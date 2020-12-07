@@ -77,10 +77,11 @@ void mpcot(
       item_pos_recver = std::vector<uint32_t>(item_set.begin(), item_set.end());
     }
 
-    for(int i = 0; i < tree_n; ++i) {
+    std::vector<std::unique_ptr<bool[]>> bs;
+    for(int i = 0; i < desc.t; ++i) {
       recvers.push_back(new SPCOT_Recver<NetIO>(netio, tree_height));
-      recvers[i]->choice_bit_gen(item_pos_recver[i]%leave_n);
-      ot->choices_recver(recvers[i]->b.get());
+      bs.emplace_back(recvers[i]->choice_bit_gen(item_pos_recver[i]%leave_n));
+      ot->choices_recver(bs.back().get());
     }
     netio->flush();
     ot->reset();
@@ -92,9 +93,9 @@ void mpcot(
         int start = i * width;
         int end = min((i+1)*width, tree_n);
         ths.emplace_back(std::thread {
-            [leave_n, ios, consist_check_chi_alpha, is_malicious, &consist_check_VW, start, end, width, recvers, ot, sparse_vector] {
+            [&bs, leave_n, ios, consist_check_chi_alpha, is_malicious, &consist_check_VW, start, end, width, recvers, ot, sparse_vector] {
           for(int i = start; i < end; ++i) {
-            recvers[i]->compute(
+            recvers[i]->compute(bs[i].get(),
                 is_malicious, ot, ios[start/width], i, sparse_vector+i*leave_n, consist_check_chi_alpha+i, consist_check_VW.data()+i);
           }}});
       }

@@ -14,19 +14,18 @@ public:
   block* ggm_tree;
   int choice_pos, depth, leave_n;
   std::vector<block> m;
-  std::unique_ptr<bool[]> b;
 
   block secret_sum_f2;
 
   SPCOT_Recver(IO *io, int depth)
-    : io(io), depth(depth), leave_n(1 << (depth-1)), m(depth-1), b(new bool[depth-1]) { }
+    : io(io), depth(depth), leave_n(1 << (depth-1)), m(depth-1) { }
 
   // generate the choice bit of blivious transfer
-  void choice_bit_gen(int choice_loc) {
-    /* std::unique_ptr<bool[]> b(new bool[depth-1]); */
+  std::unique_ptr<bool[]> choice_bit_gen(int choice_loc) {
+    std::unique_ptr<bool[]> b(new bool[depth-1]);
     choice_pos = choice_loc;
-    int leaves_n = 1<<(depth-1);
-    if(choice_pos > leaves_n) {
+    int leave_n = 1<<(depth-1);
+    if(choice_pos > leave_n) {
       std::cout << "index exceeds the limit" << std::endl;
       exit(0);
     }
@@ -36,14 +35,14 @@ public:
       b[i] = (idx % 2) == 0;
       idx >>= 1;
     }
-    /* return b; */
+    return b;
   }
 
   // receive the message and reconstruct the tree
   // j: position of the secret, begins from 0
   template <typename OT>
-  void compute(bool malicious, OT * ot, NetIO * io2, int s, block* ggm_tree_mem, block *chi_alpha, block *W) {
-    ot->recv(m.data(), b.get(), depth-1, io2, s);
+  void compute(bool* b, bool malicious, OT * ot, NetIO * io2, int s, block* ggm_tree_mem, block *chi_alpha, block *W) {
+    ot->recv(m.data(), b, depth-1, io2, s);
     io2->recv_data(&secret_sum_f2, sizeof(block));
 
     this->ggm_tree = ggm_tree_mem;
