@@ -4,65 +4,53 @@
 #include "emp-ot/emp-ot.h"
 using namespace emp;
 
-template<typename IO>
-class OTPre { public:
-  IO* io;
-  block * pre_data = nullptr;
-  bool * bits = nullptr;
+class OTPre {
+public:
+  NetIO* io;
+  int length;
+  int count;
   int n;
-  vector<block*> pointers;
-  vector<const bool*> choices;
-  vector<const block*> pointers0;
-  vector<const block*> pointers1;
+  std::vector<block> pre_data;
+  std::unique_ptr<bool[]> bits;
 
   CCRH ccrh;
-  int length, count;
-  block Delta;
-  OTPre(IO* io, int length, int times) {
-    this->io = io;
-    this->length = length;
-    n = length*times;
-    pre_data = new block[2*n];
-    bits = new bool[n];
-    count = 0;
-  }
 
-  ~OTPre() {
-    if (pre_data != nullptr)
-      delete[] pre_data;
+  OTPre(NetIO* io, int length, int times)
+    : io(io),
+      length(length),
+      count(0),
+      n(length*times),
+      pre_data(2*n),
+      bits(new bool[n]) { }
 
-    if (bits != nullptr)
-      delete[] bits;
-  }
-
-  void send_pre(block * data, block in_Delta) {
-    Delta = in_Delta;
-    ccrh.Hn(pre_data, data, 0, n, pre_data+n);
-    xorBlocks_arr(pre_data+n, data, Delta, n);
-    ccrh.Hn(pre_data+n, pre_data+n, 0, n);
+  void send_pre(block * data, block delta) {
+    ccrh.Hn(pre_data.data(), data, 0, n, pre_data.data()+n);
+    xorBlocks_arr(pre_data.data()+n, data, delta, n);
+    ccrh.Hn(pre_data.data()+n, pre_data.data()+n, 0, n);
   }
 
   void recv_pre(block * data, bool * b) {
-    memcpy(bits, b, n);
-    ccrh.Hn(pre_data, data, 0, n);
+    memcpy(bits.get(), b, n);
+    ccrh.Hn(pre_data.data(), data, 0, n);
   }
 
   void recv_pre(block * data) {
-    for(int i = 0; i < n; ++i)
+    for(int i = 0; i < n; ++i) {
       bits[i] = getLSB(data[i]);
-    ccrh.Hn(pre_data, data, 0, n);
+    }
+    ccrh.Hn(pre_data.data(), data, 0, n);
   }
 
   void choices_sender() {
-    io->recv_data(bits+count, length);
-    count +=length;
+    io->recv_data(bits.get()+count, length);
+    count += length;
   }
 
   void choices_recver(const bool * b) {
     for (int i = 0; i < length; ++i) {
       bits[count + i] = (b[i] != bits[count + i]);
     }
-    io->send_data(bits+count, length);
+    io->send_data(bits.get()+count, length);
     count +=length;
   }
 

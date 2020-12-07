@@ -8,4 +8,10 @@ enum class Role {
 };
 
 
+enum class Model {
+  Malicious,
+  Semihonest
+};
+
+
 #endif

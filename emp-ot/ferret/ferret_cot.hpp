@@ -3,7 +3,7 @@ void base_cot(
     bool malicious,
     NetIO* io,
     block delta,
-    OTPre<NetIO>* pre_ot,
+    OTPre* pre_ot,
     int num,
     block* ot_data,
     int size) {
@@ -67,16 +67,12 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
     out.delta = out.delta | 0x1;
   }
 
-  // setup
-  std::thread thread { [&out] {
-    out.pre_ot = std::make_unique<OTPre<NetIO>>(out.io, BIN_SZ_REG, T_REG);
-    out.M = K_REG + out.pre_ot->n + CONSIST_CHECK_COT_NUM;
-    out.ot_limit = N_REG - out.M;
-  }};
-
+  out.pre_ot = std::make_unique<OTPre>(out.io, BIN_SZ_REG, T_REG);
+  out.M = K_REG + out.pre_ot->n + CONSIST_CHECK_COT_NUM;
+  out.ot_limit = N_REG - out.M;
   out.ot_pre_data.resize(N_PRE_REG);
 
-  OTPre<NetIO> pre_ot_ini(ios[0], BIN_SZ_PRE_REG, T_PRE_REG);
+  OTPre pre_ot_ini(ios[0], BIN_SZ_PRE_REG, T_PRE_REG);
 
   std::vector<block> pre_data_ini(K_PRE_REG+CONSIST_CHECK_COT_NUM);
 
@@ -84,7 +80,7 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
 
   out.extend(pre_ot_ini, PRE, out.ot_pre_data, pre_data_ini);
 
-  thread.join();
+  /* thread.join(); */
 
   return out;
 }
@@ -93,7 +89,7 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
 // extend f2k in detail
 template <Role role, std::size_t threads>
 void FerretCOT<role, threads>::extend(
-    OTPre<NetIO>& preot,
+    OTPre& preot,
     const MpDesc& desc,
     std::span<block> ot_output,
     std::span<block> ot_input) {

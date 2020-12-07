@@ -21,7 +21,7 @@ struct MpDesc {
 template<Role role, std::size_t threads>
 void mpcot(
   bool is_malicious, const MpDesc& desc, NetIO* ios[threads+1],
-    block delta, block * sparse_vector, OTPre<NetIO> * ot, block *pre_cot_data) {
+    block delta, block * sparse_vector, OTPre* ot, block *pre_cot_data) {
   auto netio = ios[0];
   auto item_n = desc.t;
   auto idx_max = desc.n;
@@ -32,9 +32,9 @@ void mpcot(
 
 
 
-  block* consist_check_chi_alpha = nullptr;
+  std::vector<block> consist_check_chi_alpha;;
   if constexpr(role == Role::Receiver) {
-    consist_check_chi_alpha = new block[item_n];
+    consist_check_chi_alpha = std::vector<block>(item_n);
   }
   std::vector<block> consist_check_VW(item_n);
 
@@ -44,7 +44,6 @@ void mpcot(
     }
     netio->flush();
     ot->reset();
-    /* exec_parallel_sender(ot, sparse_vector); */
 
     { // execute the single-point OTs in parallel
       std::vector<std::thread> ths;
@@ -95,7 +94,7 @@ void mpcot(
                 tree_height,
                 item_pos_recver[j]%leave_n,
                 bs[j].get(),
-                is_malicious, ot, ios[start/width], j, sparse_vector+j*leave_n, consist_check_chi_alpha+j, consist_check_VW.data()+j);
+                is_malicious, ot, ios[start/width], j, sparse_vector+j*leave_n, consist_check_chi_alpha.data()+j, consist_check_VW.data()+j);
           }}});
       }
 
@@ -125,13 +124,13 @@ void mpcot(
     } else {
       block r1, r2, r3;
       vector_self_xor(&r1, consist_check_VW.data(), tree_n);
-      vector_self_xor(&r2, consist_check_chi_alpha, tree_n);
+      vector_self_xor(&r2, consist_check_chi_alpha.data(), tree_n);
       uint64_t pos[2];
       pos[0] = _mm_extract_epi64(r2, 0);
       pos[1] = _mm_extract_epi64(r2, 1);
       bool pre_cot_bool[128];
-      for(int i = 0; i < 2; ++i) {
-        for(int j = 0; j < 64; ++j) {
+      for (int i = 0; i < 2; ++i) {
+        for (int j = 0; j < 64; ++j) {
           pre_cot_bool[i*64+j] = ((pos[i] & 1) == 1) ^ getLSB(pre_cot_data[i*64+j]);
           pos[i] >>= 1;
         }
@@ -145,13 +144,10 @@ void mpcot(
       hash.hash_once(dig, &r1, sizeof(block));
       block recv[2];
       netio->recv_data(recv, 2*sizeof(block));
-      if(!cmpBlock(dig, recv, 2))
+      if (!cmpBlock(dig, recv, 2)) {
         std::cout << "SPCOT consistency check fails" << std::endl;
+      }
     }
-  }
-
-  if (role == Role::Receiver) {
-    delete[] consist_check_chi_alpha;
   }
 }
 

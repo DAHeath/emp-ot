@@ -60,10 +60,10 @@ private:
 
   std::vector<block> ot_pre_data;
 
-  std::unique_ptr<OTPre<NetIO>> pre_ot;
+  std::unique_ptr<OTPre> pre_ot;
 
   void extend(
-      OTPre<NetIO>&,
+      OTPre&,
       const MpDesc&,
       std::span<block> ot_output, std::span<block> ot_input);
 };
