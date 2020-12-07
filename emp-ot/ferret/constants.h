@@ -3,9 +3,6 @@
 
 namespace emp {
 
-static std::string PRE_OT_DATA_REG_SEND_FILE = "./data/pre_ot_data_reg_send";
-static std::string PRE_OT_DATA_REG_RECV_FILE = "./data/pre_ot_data_reg_recv";
-
 constexpr int N_REG = 10608640;
 constexpr int T_REG = 1295;
 constexpr int K_REG = 589824;

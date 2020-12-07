@@ -36,7 +36,7 @@ block seed_gen(NetIO& io) {
 //Performance highly dependent on the CPU cache size
 template<Role role, int d = 10>
 void lpn(
-    int n, int k, ThreadPool * pool, NetIO *io, int threads,
+    int n, int k, NetIO *io, int threads,
     block * nn, const block * kk) {
 
   int mask = mkMask(k);
@@ -75,16 +75,17 @@ void lpn(
 
   vector<std::future<void>> fut;
   int width = n/(threads+1);
+  std::vector<std::thread> ths;
   for (int i = 0; i < threads; ++i) {
     int start = i * width;
     int end = min((i+1)* width, n);
-    fut.push_back(pool->enqueue([&, start, end]() { task(start, end); }));
+    ths.emplace_back(std::thread { [&, start, end]() { task(start, end); } });
   }
   int start = threads * width;
   int end = min((threads+1) * width, n);
   task(start, end);
 
-  for (auto &f: fut) f.get();
+  for (auto& th: ths) { th.join(); }
 }
 
 #endif
