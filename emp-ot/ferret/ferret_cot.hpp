@@ -1,31 +1,35 @@
-template <int threads>
-FerretCOT<threads>::FerretCOT(int party, NetIO* ios[threads+1], bool malicious) {
-  this->party = party;
+template <Role role, int threads>
+FerretCOT<role, threads>::FerretCOT(NetIO* ios[threads+1], bool malicious) {
   io = ios[0];
   this->ios = ios;
   this->is_malicious = malicious;
-  BaseCot base_cot(party, io, malicious);
   pool = std::make_unique<ThreadPool>(threads);
 
-  if (party == ALICE) {
+  if constexpr (role == Role::Sender) {
+    BaseCot base_cot(ALICE, io, malicious);
     PRG prg;
     prg.random_block(&Delta);
     Delta = Delta | 0x1;
     setup(base_cot, Delta);
   } else {
+    BaseCot base_cot(BOB, io, malicious);
     setup(base_cot);
   }
 }
 
+
 // extend f2k in detail
-template<int threads>
-void FerretCOT<threads>::extend(
-    int party, int n, int k, NetIO* io,
+template <Role role, int threads>
+void FerretCOT<role, threads>::extend(
+    int n, int k, NetIO* io,
     block* ot_output, MpcotReg<threads> *mpcot, OTPre<NetIO> *preot, block *ot_input) {
-  if(party == ALICE) mpcot->sender_init(Delta);
-  else mpcot->recver_init();
+  if constexpr (role == Role::Sender) {
+    mpcot->sender_init(Delta);
+  } else {
+    mpcot->recver_init();
+  }
   mpcot->mpcot(ot_output, preot, ot_input);
-  if (party == ALICE) {
+  if constexpr (role == Role::Sender) {
     lpn<Role::Sender>(n, k, io, threads, ot_output, ot_input+mpcot->consist_check_cot_num);
   } else {
     lpn<Role::Receiver>(n, k, io, threads, ot_output, ot_input+mpcot->consist_check_cot_num);
@@ -33,29 +37,30 @@ void FerretCOT<threads>::extend(
 }
 
 // extend f2k (customized location)
-template<int threads>
-void FerretCOT<threads>::extend_f2k(block *ot_buffer) {
-  if(party == ALICE) {
+template <Role role, int threads>
+void FerretCOT<role, threads>::extend_f2k(block *ot_buffer) {
+  if constexpr (role == Role::Sender) {
     pre_ot->send_pre(ot_pre_data.data(), Delta);
   } else {
     pre_ot->recv_pre(ot_pre_data.data());
   }
-  extend(party, N_REG, K_REG, io, ot_buffer, mpcot.get(), pre_ot.get(), ot_pre_data.data());
+  extend(N_REG, K_REG, io, ot_buffer, mpcot.get(), pre_ot.get(), ot_pre_data.data());
   memcpy(ot_pre_data.data(), ot_buffer+ot_limit, M*sizeof(block));
   ot_used = 0;
 }
 
-template<int threads>
-void FerretCOT<threads>::setup(BaseCot& base_cot, block Deltain) {
+template <Role role, int threads>
+void FerretCOT<role, threads>::setup(BaseCot& base_cot, block Deltain) {
   this->Delta = Deltain;
   setup(base_cot);
 }
 
-template<int threads>
-void FerretCOT<threads>::setup(BaseCot& base_cot) {
+template <Role role, int threads>
+void FerretCOT<role, threads>::setup(BaseCot& base_cot) {
   ThreadPool pool2(1);
 
-  std::thread thread { [this] {
+  int party = role == Role::Sender ? ALICE : BOB;
+  std::thread thread { [this, party] {
     mpcot = std::make_unique<MpcotReg<threads>>(is_malicious, party, N_REG, T_REG, BIN_SZ_REG, pool.get(), ios);
     pre_ot = std::make_unique<OTPre<NetIO>>(io, mpcot->tree_height-1, mpcot->tree_n);
     M = K_REG + pre_ot->n + mpcot->consist_check_cot_num;
@@ -64,7 +69,7 @@ void FerretCOT<threads>::setup(BaseCot& base_cot) {
   }};
 
   ot_pre_data.resize(N_PRE_REG);
-  if (party == BOB) {
+  if constexpr (role == Role::Receiver) {
     base_cot.cot_gen_pre();
   } else {
     base_cot.cot_gen_pre(Delta);
@@ -78,13 +83,14 @@ void FerretCOT<threads>::setup(BaseCot& base_cot) {
 
   base_cot.cot_gen(&pre_ot_ini, pre_ot_ini.n);
   base_cot.cot_gen(pre_data_ini, K_PRE_REG+mpcot_ini.consist_check_cot_num);
-  extend(party, N_PRE_REG, K_PRE_REG, io, ot_pre_data.data(), &mpcot_ini, &pre_ot_ini, pre_data_ini);
+  extend(N_PRE_REG, K_PRE_REG, io, ot_pre_data.data(), &mpcot_ini, &pre_ot_ini, pre_data_ini);
 
   thread.join();
 }
 
-template<int threads>
-void FerretCOT<threads>::rcot(block* data, int num) {
+
+template <Role role, int threads>
+void FerretCOT<role, threads>::rcot(block* data, int num) {
   ot_data.resize(N_REG);
   if (num <= ot_limit - ot_used) {
     memcpy(data, ot_data.data()+ot_used, num*sizeof(block));
@@ -117,8 +123,8 @@ void FerretCOT<threads>::rcot(block* data, int num) {
   }
 }
 
-template<int threads>
-uint64_t FerretCOT<threads>::byte_memory_need_inplace(uint64_t ot_need) {
+template <Role role, int threads>
+uint64_t FerretCOT<role, threads>::byte_memory_need_inplace(uint64_t ot_need) {
   int round = (ot_need - 1) / ot_limit;
   return round * ot_limit + N_REG;
 }
@@ -126,8 +132,8 @@ uint64_t FerretCOT<threads>::byte_memory_need_inplace(uint64_t ot_need) {
 // extend f2k (benchmark)
 // parameter "length" should be the return of "byte_memory_need_inplace"
 // output the number of COTs that can be used
-template<int threads>
-uint64_t FerretCOT<threads>::rcot_inplace(block *ot_buffer, int byte_space) {
+template <Role role, int threads>
+uint64_t FerretCOT<role, threads>::rcot_inplace(block *ot_buffer, int byte_space) {
   if(byte_space < N_REG) error("space not enough");
   if((byte_space - M) % ot_limit != 0) error("call byte_memory_need_inplace \
       to get the correct length of memory space");
@@ -135,13 +141,13 @@ uint64_t FerretCOT<threads>::rcot_inplace(block *ot_buffer, int byte_space) {
   int round = ot_output_n / ot_limit;
   block *pt = ot_buffer;
   for(int i = 0; i < round; ++i) {
-    if (party == ALICE) {
+    if constexpr (role == Role::Sender) {
       pre_ot->send_pre(ot_pre_data.data(), Delta);
     } else {
       pre_ot->recv_pre(ot_pre_data.data());
     }
     extend(
-        party, N_REG, K_REG, io,
+        N_REG, K_REG, io,
         pt, mpcot.get(), pre_ot.get(), ot_pre_data.data());
     pt += ot_limit;
     memcpy(ot_pre_data.data(), pt, M*sizeof(block));

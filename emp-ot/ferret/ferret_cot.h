@@ -5,6 +5,8 @@
 #include "emp-ot/ferret/lpn_f2.h"
 #include "emp-ot/ferret/constants.h"
 
+#include "emp-ot/ferret/role.h"
+
 namespace emp {
 
 /*
@@ -13,7 +15,7 @@ namespace emp {
  * https://eprint.iacr.org/2020/924.pdf
  *
  */
-template<int threads>
+template<Role role, int threads>
 class FerretCOT {
 public:
   NetIO* io;
@@ -21,7 +23,7 @@ public:
 
   int ot_used, ot_limit;
 
-  FerretCOT(int party, NetIO* ios[threads+1], bool malicious = false);
+  FerretCOT(NetIO* ios[threads+1], bool malicious = false);
 
   void setup(BaseCot&, block Deltain);
   void setup(BaseCot&);
@@ -33,7 +35,6 @@ public:
 
 private:
   NetIO **ios;
-  int party;
   int M;
   bool is_malicious;
 
@@ -45,7 +46,7 @@ private:
   std::unique_ptr<MpcotReg<threads>> mpcot;
 
   void extend(
-      int party, int n, int k, NetIO* io,
+      int n, int k, NetIO* io,
       block* ot_output, MpcotReg<threads> *mpfss, OTPre<NetIO> *preot, block *ot_input);
 
   void extend_f2k(block *ot_buffer);
