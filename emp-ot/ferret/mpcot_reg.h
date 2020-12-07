@@ -3,8 +3,7 @@
 
 #include <emp-tool/emp-tool.h>
 #include <set>
-#include "emp-ot/ferret/spcot_sender.h"
-#include "emp-ot/ferret/spcot_recver.h"
+#include "emp-ot/ferret/spcot.h"
 #include "emp-ot/ferret/preot.h"
 #include "emp-ot/ferret/role.h"
 
@@ -38,8 +37,6 @@ void mpcot(
     consist_check_chi_alpha = new block[item_n];
   }
   std::vector<block> consist_check_VW(item_n);
-
-  vector<SPCOT_Recver<NetIO>*> recvers;
 
   if constexpr (role == Role::Sender) {
     for(int i = 0; i < tree_n; ++i) {
@@ -79,8 +76,7 @@ void mpcot(
 
     std::vector<std::unique_ptr<bool[]>> bs;
     for(int i = 0; i < desc.t; ++i) {
-      recvers.push_back(new SPCOT_Recver<NetIO>(netio, tree_height));
-      bs.emplace_back(recvers[i]->choice_bit_gen(item_pos_recver[i]%leave_n));
+      bs.emplace_back(choice_bit_gen(tree_height, item_pos_recver[i]%leave_n));
       ot->choices_recver(bs.back().get());
     }
     netio->flush();
@@ -93,10 +89,13 @@ void mpcot(
         int start = i * width;
         int end = min((i+1)*width, tree_n);
         ths.emplace_back(std::thread {
-            [&bs, leave_n, ios, consist_check_chi_alpha, is_malicious, &consist_check_VW, start, end, width, recvers, ot, sparse_vector] {
-          for(int i = start; i < end; ++i) {
-            recvers[i]->compute(bs[i].get(),
-                is_malicious, ot, ios[start/width], i, sparse_vector+i*leave_n, consist_check_chi_alpha+i, consist_check_VW.data()+i);
+            [&, start, end] {
+          for(int j = start; j < end; ++j) {
+            spcot_recv(
+                tree_height,
+                item_pos_recver[j]%leave_n,
+                bs[j].get(),
+                is_malicious, ot, ios[start/width], j, sparse_vector+j*leave_n, consist_check_chi_alpha+j, consist_check_VW.data()+j);
           }}});
       }
 
@@ -104,7 +103,7 @@ void mpcot(
     }
   }
 
-  if(is_malicious) {
+  if (is_malicious) {
     // consistency check
     GaloisFieldPacking pack;
     if constexpr (role == Role::Sender) {
@@ -149,10 +148,6 @@ void mpcot(
       if(!cmpBlock(dig, recv, 2))
         std::cout << "SPCOT consistency check fails" << std::endl;
     }
-  }
-
-  for (auto p : recvers) {
-    delete p;
   }
 
   if (role == Role::Receiver) {
