@@ -2,112 +2,89 @@
 #define EMP_LPN_F2K_H__
 
 #include "emp-tool/emp-tool.h"
+#include "emp-ot/ferret/role.h"
+
 using namespace emp;
+
+
+constexpr int mkMask(int k) {
+  int out = 1;
+  while (out < k) {
+    out <<= 1;
+    out = out | 0x1;
+  }
+  return out;
+}
+
+
+template <Role role>
+block seed_gen(NetIO& io) {
+  block seed;
+  if constexpr (role == Role::Sender) {
+    PRG prg;
+    prg.random_block(&seed, 1);
+    io.send_data(&seed, sizeof(block));
+  } else {
+    io.recv_data(&seed, sizeof(block));
+  }
+  io.flush();
+  return seed;
+}
+
 
 //Implementation of local linear code on F_2^k
 //Performance highly dependent on the CPU cache size
-template<int d = 10>
-class LpnF2 { public:
-	int party;
-	int k, n;
-	ThreadPool * pool;
-	NetIO *io;
-	int threads;
-	block seed;
-	int mask;
-	LpnF2 (int party, int n, int k, ThreadPool * pool, NetIO *io, int threads) {
-		this->party = party;
-		this->k = k;
-		this->n = n;
-		this->pool = pool;
-		this->io = io;
-		this->threads = threads;
-		mask = 1;
-		while(mask < k) {
-			mask <<=1;
-			mask = mask | 0x1;
-		}
-	}
+template<Role role, int d = 10>
+void lpn(
+    int n, int k, ThreadPool * pool, NetIO *io, int threads,
+    block * nn, const block * kk) {
 
-	void __compute4(block * nn, const block * kk, int i, PRP * prp) {
-		block tmp[10];
-		for(int m = 0; m < 10; ++m)
-			tmp[m] = makeBlock(i, m);
-		AES_ecb_encrypt_blks(tmp, 10, &prp->aes);
-		uint32_t* r = (uint32_t*)(tmp);
-		for(int m = 0; m < 4; ++m)
-			for (int j = 0; j < d; ++j) {
-				int index = (*r) & mask;
-				++r;
-				index = index >= k? index-k:index;
-				nn[i+m] = nn[i+m] ^ kk[index];
-			}
-	}
+  int mask = mkMask(k);
+  const block seed = seed_gen<role>(*io);
 
-	void __compute1(block * nn, const block * kk, int i, PRP*prp) {
-		block tmp[3];
-		for(int m = 0; m < 3; ++m)
-			tmp[m] = makeBlock(i, m);
-		prp->permute_block(tmp, 3);
-		uint32_t* r = (uint32_t*)(tmp);
-		for (int j = 0; j < d; ++j)
-			nn[i] = nn[i] ^ kk[r[j]%k];
-	}
+  const auto task = [nn, kk, seed, mask, k](int start, int end) {
+    PRP prp(seed);
+    int j = start;
+    block tmp[10];
+    for(; j < end-4; j+=4) {
+      for(int m = 0; m < 10; ++m) {
+        tmp[m] = makeBlock(j, m);
+      }
+      AES_ecb_encrypt_blks(tmp, 10, &prp.aes);
+      uint32_t* r = reinterpret_cast<uint32_t*>(tmp);
+      for (int m = 0; m < 4; ++m) {
+        for (int ix = 0; ix < d; ++ix) {
+          int index = (*r) & mask;
+          ++r;
+          index = index >= k ? index-k : index;
+          nn[j+m] = nn[j+m] ^ kk[index];
+        }
+      }
+    }
+    for(; j < end; ++j) {
+      for(int m = 0; m < 3; ++m) {
+        tmp[m] = makeBlock(j, m);
+      }
+      AES_ecb_encrypt_blks(tmp, 3, &prp.aes);
+      uint32_t* r = (uint32_t*)(tmp);
+      for (int ix = 0; ix < d; ++ix) {
+        nn[j] = nn[j] ^ kk[r[ix]%k];
+      }
+    }
+  };
 
-	void task(block * nn, const block * kk, int start, int end) {
-		PRP prp(seed);
-		int j = start;
-		for(; j < end-4; j+=4)
-			__compute4(nn, kk, j, &prp);
-		for(; j < end; ++j)
-			__compute1(nn, kk, j, &prp);
-	}
+  vector<std::future<void>> fut;
+  int width = n/(threads+1);
+  for (int i = 0; i < threads; ++i) {
+    int start = i * width;
+    int end = min((i+1)* width, n);
+    fut.push_back(pool->enqueue([&, start, end]() { task(start, end); }));
+  }
+  int start = threads * width;
+  int end = min((threads+1) * width, n);
+  task(start, end);
 
-	void compute(block * nn, const block * kk) {
-		vector<std::future<void>> fut;
-		int width = n/(threads+1);
-		seed = seed_gen();
-		for(int i = 0; i < threads; ++i) {
-			int start = i * width;
-			int end = min((i+1)* width, n);
-			fut.push_back(pool->enqueue([this, nn, kk, start, end]() {
-				task(nn, kk, start, end);
-			}));
-		}
-		int start = threads * width;
-		int end = min( (threads+1) * width, n);
-		task(nn, kk, start, end);
+  for (auto &f: fut) f.get();
+}
 
-		for (auto &f: fut) f.get();
-	}
-
-	block seed_gen() {
-		block seed;
-		if(party == ALICE) {
-			PRG prg;
-			prg.random_block(&seed, 1);
-			io->send_data(&seed, sizeof(block));
-		} else {
-			io->recv_data(&seed, sizeof(block));
-		}io->flush();
-		return seed;
-	}
-	void bench(block * nn, const block * kk) {
-		vector<std::future<void>> fut;
-		int width = n/(threads+1);
-		for(int i = 0; i < threads; ++i) {
-			int start = i * width;
-			int end = min((i+1)* width, n);
-			fut.push_back(pool->enqueue([this, nn, kk, start, end]() {
-				task(nn, kk, start, end);
-			}));
-		}
-		int start = threads * width;
-		int end = min( (threads+1) * width, n);
-		task(nn, kk, start, end);
-
-		for (auto &f: fut) f.get();
-	}
-
-};
 #endif

@@ -2,6 +2,10 @@ cmake_minimum_required (VERSION 3.0)
 project (emp-ot)
 set(NAME "emp-ot")
 
+add_definitions(-Wfatal-errors)
+
+set(CMAKE_CXX_STANDARD 20)
+
 find_path(CMAKE_FOLDER NAMES cmake/emp-tool-config.cmake)
 include(${CMAKE_FOLDER}/cmake/common.cmake)
 include(${CMAKE_FOLDER}/cmake/enable_rdseed.cmake)
@@ -15,7 +19,7 @@ install(FILES cmake/emp-ot-config.cmake DESTINATION cmake/)
 install(DIRECTORY emp-ot DESTINATION include/)
 
 macro (add_test _name)
-	add_test_with_lib(${_name} ${EMP-TOOL_LIBRARIES})
+  add_test_with_lib(${_name} ${EMP-TOOL_LIBRARIES})
 endmacro()
 
 add_test(ot)
