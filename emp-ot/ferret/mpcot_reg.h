@@ -111,7 +111,6 @@ public:
       ths.emplace_back(std::thread {
           [this, start, end, width, ot, sparse_vector] {
         for(int i = start; i < end; ++i) {
-          /* exec_f2k_sender(ot, sparse_vector+i*leave_n, ios[start/width], i); */
           spcot_send(tree_height, is_malicious, ot, ios[start/width], i, sparse_vector+i*leave_n, Delta_f2k, consist_check_VW+i);
         }}});
     }
@@ -138,10 +137,6 @@ public:
       exec_f2k_recver(recvers[i], ot, sparse_vector+i*leave_n, 
           ios[threads], i);
     for (auto& th : ths) { th.join(); }
-  }
-
-  void exec_f2k_sender(OTPre<NetIO> *ot, block *ggm_tree_mem, NetIO *io, int i) {
-    spcot_send(tree_height, is_malicious, ot, io, i, ggm_tree_mem, Delta_f2k, consist_check_VW+i);
   }
 
   void exec_f2k_recver(SPCOT_Recver<NetIO> *recver, OTPre<NetIO> *ot,
