@@ -58,6 +58,8 @@ template <Role role, std::size_t threads>
 FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], bool malicious) {
   FerretCOT out;
   out.io = ios[0];
+  out.malicious = malicious;
+  out.ios = ios;
 
   if constexpr (role == Role::Sender) {
     PRG prg;
@@ -66,24 +68,21 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
   }
 
   // setup
-  int party = role == Role::Sender ? ALICE : BOB;
-  std::thread thread { [&out, ios, party, malicious] {
-    out.mpcot = std::make_unique<MpcotReg<threads>>(malicious, party, N_REG, T_REG, BIN_SZ_REG, ios);
-    out.pre_ot = std::make_unique<OTPre<NetIO>>(out.io, out.mpcot->tree_height-1, out.mpcot->tree_n);
-    out.M = K_REG + out.pre_ot->n + out.mpcot->consist_check_cot_num;
+  std::thread thread { [&out] {
+    out.pre_ot = std::make_unique<OTPre<NetIO>>(out.io, BIN_SZ_REG, T_REG);
+    out.M = K_REG + out.pre_ot->n + CONSIST_CHECK_COT_NUM;
     out.ot_limit = N_REG - out.M;
   }};
 
   out.ot_pre_data.resize(N_PRE_REG);
 
-  MpcotReg<threads> mpcot_ini(malicious, party, N_PRE_REG, T_PRE_REG, BIN_SZ_PRE_REG, ios);
-  OTPre<NetIO> pre_ot_ini(ios[0], mpcot_ini.tree_height-1, mpcot_ini.tree_n);
+  OTPre<NetIO> pre_ot_ini(ios[0], BIN_SZ_PRE_REG, T_PRE_REG);
 
-  std::vector<block> pre_data_ini(K_PRE_REG+mpcot_ini.consist_check_cot_num);
+  std::vector<block> pre_data_ini(K_PRE_REG+CONSIST_CHECK_COT_NUM);
 
-  base_cot<role>(malicious, out.io, out.delta, &pre_ot_ini, pre_ot_ini.n, pre_data_ini.data(), K_PRE_REG+mpcot_ini.consist_check_cot_num);
+  base_cot<role>(malicious, out.io, out.delta, &pre_ot_ini, pre_ot_ini.n, pre_data_ini.data(), K_PRE_REG+CONSIST_CHECK_COT_NUM);
 
-  out.extend(mpcot_ini, pre_ot_ini, N_PRE_REG, K_PRE_REG, out.ot_pre_data, pre_data_ini);
+  out.extend(pre_ot_ini, PRE, out.ot_pre_data, pre_data_ini);
 
   thread.join();
 
@@ -94,15 +93,14 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
 // extend f2k in detail
 template <Role role, std::size_t threads>
 void FerretCOT<role, threads>::extend(
-    MpcotReg<threads>& mpcot, OTPre<NetIO>& preot,
-    std::size_t n, std::size_t k, std::span<block> ot_output, std::span<block> ot_input) {
-  if constexpr (role == Role::Sender) {
-    mpcot.sender_init(delta);
-  } else {
-    mpcot.recver_init();
-  }
-  mpcot.mpcot(ot_output.data(), &preot, ot_input.data());
-  lpn<role>(n, k, io, threads, ot_output.data(), ot_input.data() + mpcot.consist_check_cot_num);
+    OTPre<NetIO>& preot,
+    const MpDesc& desc,
+    std::span<block> ot_output,
+    std::span<block> ot_input) {
+  int party = role == Role::Sender ? ALICE : BOB;
+  MpcotReg<threads> mpcot(malicious, party, desc, ios);
+  mpcot.mpcot(delta, ot_output.data(), &preot, ot_input.data());
+  lpn<role>(desc.n, desc.k, io, threads, ot_output.data(), ot_input.data() + CONSIST_CHECK_COT_NUM);
 }
 
 template <Role role, std::size_t threads>
@@ -127,7 +125,7 @@ std::size_t FerretCOT<role, threads>::rcot_inplace(std::span<block> buf) {
     } else {
       pre_ot->recv_pre(ot_pre_data.data());
     }
-    extend(*mpcot, *pre_ot, N_REG, K_REG, buf, ot_pre_data);
+    extend(*pre_ot, REGULAR, buf, ot_pre_data);
     buf = buf.subspan(ot_limit);
     std::copy(buf.begin(), buf.begin() + M, ot_pre_data.begin());
   }

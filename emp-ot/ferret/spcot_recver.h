@@ -22,32 +22,30 @@ public:
     : io(io), depth(depth), leave_n(1 << (depth-1)), m(depth-1), b(new bool[depth-1]) { }
 
   // generate the choice bit of blivious transfer
-  void choice_bit_gen(int idxin) {
-    choice_pos = idxin;
+  void choice_bit_gen(int choice_loc) {
+    /* std::unique_ptr<bool[]> b(new bool[depth-1]); */
+    choice_pos = choice_loc;
     int leaves_n = 1<<(depth-1);
     if(choice_pos > leaves_n) {
       std::cout << "index exceeds the limit" << std::endl;
       exit(0);
     }
 
-    int idx = idxin--;
+    int idx = choice_loc--;
     for(int i = depth-2; i >= 0; --i) {
       b[i] = (idx % 2) == 0;
       idx >>= 1;
     }
+    /* return b; */
   }
 
   // receive the message and reconstruct the tree
   // j: position of the secret, begins from 0
   template <typename OT>
-  void recv_f2k(OT * ot, NetIO * io2, int s) {
+  void compute(bool malicious, OT * ot, NetIO * io2, int s, block* ggm_tree_mem, block *chi_alpha, block *W) {
     ot->recv(m.data(), b.get(), depth-1, io2, s);
     io2->recv_data(&secret_sum_f2, sizeof(block));
-  }
 
-  // receive the message and reconstruct the tree
-  // j: position of the secret, begins from 0
-  void compute(block* ggm_tree_mem) {
     this->ggm_tree = ggm_tree_mem;
 
     { // gmm tree reconstruction
@@ -56,7 +54,22 @@ public:
       for (int i = 0; i < depth-1; ++i) {
         to_fill_idx = to_fill_idx * 2;
         ggm_tree[to_fill_idx] = ggm_tree[to_fill_idx+1] = zero_block;
-        layer_recover(i+1, b[i], to_fill_idx + b[i], m[i], &prp);
+
+        { // reconstruct a layer of the ggm tree
+          int item_n = 1<< (i+1);
+          block nodes_sum = zero_block;
+
+          for (int j = b[i] != 0; j < item_n; j+=2) {
+            nodes_sum = nodes_sum ^ ggm_tree[j];
+          }
+          ggm_tree[to_fill_idx + b[i]] = nodes_sum ^ m[i];
+          if(i+1 != this->depth-1) {
+            for (int j = item_n-2; j >= 0; j-=2) {
+              prp.node_expand_2to4(&ggm_tree[j*2], &ggm_tree[j]);
+            }
+          }
+        }
+
         to_fill_idx += !b[i];
       }
     }
@@ -69,34 +82,17 @@ public:
       nodes_sum = nodes_sum ^ ggm_tree[i];
     }
     ggm_tree[choice_pos] = nodes_sum ^ secret_sum_f2;
-  }
 
-  void layer_recover(int depth, int lr, int to_fill_idx, block sum, TwoKeyPRP *prp) {
-    int layer_start = 0;
-    int item_n = 1<<depth;
-    block nodes_sum = zero_block;
-    int lr_start = lr==0?layer_start:(layer_start+1);
-
-    for (int i = lr_start; i < item_n; i+=2) {
-      nodes_sum = nodes_sum ^ ggm_tree[i];
+    if (malicious) {
+      // check consistency
+      std::vector<block> chi(leave_n);
+      Hash hash;
+      block digest[2];
+      hash.hash_once(digest, &secret_sum_f2, sizeof(block));
+      uni_hash_coeff_gen(chi.data(), digest[0], leave_n);
+      *chi_alpha = chi[choice_pos];
+      vector_inn_prdt_sum_red(W, chi.data(), ggm_tree, leave_n);
     }
-    ggm_tree[to_fill_idx] = nodes_sum ^ sum;
-    if(depth == this->depth-1) {
-      return;
-    }
-    for (int i = item_n-2; i >= 0; i-=2) {
-      prp->node_expand_2to4(&ggm_tree[i*2], &ggm_tree[i]);
-    }
-  }
-
-  void consistency_check_msg_gen(block *chi_alpha, block *W) {
-    std::vector<block> chi(leave_n);
-    Hash hash;
-    block digest[2];
-    hash.hash_once(digest, &secret_sum_f2, sizeof(block));
-    uni_hash_coeff_gen(chi.data(), digest[0], leave_n);
-    *chi_alpha = chi[choice_pos];
-    vector_inn_prdt_sum_red(W, chi.data(), ggm_tree, leave_n);
   }
 };
 #endif

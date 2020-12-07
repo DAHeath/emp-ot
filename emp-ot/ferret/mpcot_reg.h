@@ -10,6 +10,13 @@
 using namespace emp;
 using std::future;
 
+struct MpDesc {
+  std::size_t n;
+  std::size_t k;
+  std::size_t t;
+  std::size_t bin_sz;
+};
+
 template<int threads>
 class MpcotReg {
 public:
@@ -17,179 +24,156 @@ public:
   int item_n, idx_max, m;
   int tree_height, leave_n;
   int tree_n;
-  int consist_check_cot_num;
   bool is_malicious;
 
-  PRG prg;
   NetIO *netio;
   NetIO* ios[threads+1];
   block Delta_f2k;
-  block *consist_check_chi_alpha = nullptr, *consist_check_VW = nullptr;
+  block* consist_check_chi_alpha = nullptr;
+  block* consist_check_VW = nullptr;
 
   std::vector<uint32_t> item_pos_recver;
-  GaloisFieldPacking pack;
 
-  MpcotReg(bool is_malicious, int party, int n, int t, int log_bin_sz, NetIO* ios[threads+1])
+  MpcotReg(bool is_malicious, int party, const MpDesc& desc, NetIO* ios[threads+1])
     : is_malicious(is_malicious)
   {
     this->party = party;
     netio = ios[0];
     for (int i = 0; i < threads+1; ++i)
       this->ios[i] = ios[i];
-    consist_check_cot_num = 128;
 
-    this->item_n = t;
-    this->idx_max = n;
-    this->tree_height = log_bin_sz+1;
+    this->item_n = desc.t;
+    this->idx_max = desc.n;
+    this->tree_height = desc.bin_sz+1;
     this->leave_n = 1<<(this->tree_height-1);
     this->tree_n = this->item_n;
   }
 
-  void sender_init(block delta) {
-    Delta_f2k = delta;
-  }
-
-  void recver_init() {
-    std::set<uint32_t> item_set;
-    uint32_t rdata;
-    item_set.clear();
-    while(item_set.size() < (size_t)this->item_n) {
-      this->prg.random_data(&rdata, sizeof(uint32_t));
-      item_set.insert(rdata%this->idx_max);
-    }
-    item_pos_recver = std::vector<uint32_t>(item_set.begin(), item_set.end());
-  }
-
   // MPFSS F_2k
-  void mpcot(block * sparse_vector, OTPre<NetIO> * ot, block *pre_cot_data) {
-    if(party == BOB) consist_check_chi_alpha = new block[item_n];
-    consist_check_VW = new block[item_n];
+  void mpcot(block delta, block * sparse_vector, OTPre<NetIO> * ot, block *pre_cot_data) {
+    if(party == BOB) {
+      consist_check_chi_alpha = new block[item_n];
+    }
+    std::vector<block> consist_check_VW(item_n);
 
     vector<SPCOT_Recver<NetIO>*> recvers;
 
     if(party == ALICE) {
-      mpcot_init_sender(ot);
-      exec_parallel_sender(ot, sparse_vector);
-    } else {
-      mpcot_init_recver(recvers, ot);
-      exec_parallel_recver(recvers, ot, sparse_vector);
-    }
-
-    if(is_malicious)
-      consistency_check_f2k(pre_cot_data, tree_n);
-
-    for (auto p : recvers) delete p;
-
-    if(party == BOB) delete[] consist_check_chi_alpha;
-    delete[] consist_check_VW;
-  }
-
-  void mpcot_init_sender(OTPre<NetIO> *ot) {
-    for(int i = 0; i < tree_n; ++i) {
-      ot->choices_sender();
-    }
-    netio->flush();
-    ot->reset();
-  }
-
-  void mpcot_init_recver(vector<SPCOT_Recver<NetIO>*> &recvers, OTPre<NetIO> *ot) {
-    for(int i = 0; i < tree_n; ++i) {
-      recvers.push_back(new SPCOT_Recver<NetIO>(netio, tree_height));
-      recvers[i]->choice_bit_gen(item_pos_recver[i]%leave_n);
-      ot->choices_recver(recvers[i]->b.get());
-    }
-    netio->flush();
-    ot->reset();
-  }
-
-  void exec_parallel_sender(OTPre<NetIO> *ot, block* sparse_vector) {
-    std::vector<std::thread> ths;
-    int width = (this->tree_n+threads)/(threads+1);	
-    for(int i = 0; i < threads+1; ++i) {
-      int start = i * width;
-      int end = min((i+1)*width, tree_n);
-      ths.emplace_back(std::thread {
-          [this, start, end, width, ot, sparse_vector] {
-        for(int i = start; i < end; ++i) {
-          spcot_send(tree_height, is_malicious, ot, ios[start/width], i, sparse_vector+i*leave_n, Delta_f2k, consist_check_VW+i);
-        }}});
-    }
-    for (auto& th : ths) { th.join(); }
-  }
-
-  void exec_parallel_recver(vector<SPCOT_Recver<NetIO>*> &recvers,
-      OTPre<NetIO> *ot, block* sparse_vector) {
-    std::vector<std::thread> ths;
-    int width = (this->tree_n+threads)/(threads+1);	
-    for(int i = 0; i < threads; ++i) {
-      int start = i * width;
-      int end = min((i+1)*width, tree_n);
-      ths.emplace_back(std::thread {
-          [this, start, end, width, recvers, ot, sparse_vector] {
-        for(int i = start; i < end; ++i) {
-          exec_f2k_recver(recvers[i], ot, sparse_vector+i*leave_n, ios[start/width], i);
-        }}});
-    }
-
-    int start = threads*width;
-    int end = min((threads+1)*width, tree_n);
-    for(int i = start; i < end; ++i)
-      exec_f2k_recver(recvers[i], ot, sparse_vector+i*leave_n, 
-          ios[threads], i);
-    for (auto& th : ths) { th.join(); }
-  }
-
-  void exec_f2k_recver(SPCOT_Recver<NetIO> *recver, OTPre<NetIO> *ot,
-      block *ggm_tree_mem, NetIO *io, int i) {
-    recver->recv_f2k<OTPre<NetIO>>(ot, io, i);
-    recver->compute(ggm_tree_mem);
-    if(is_malicious) 
-      recver->consistency_check_msg_gen(consist_check_chi_alpha+i, consist_check_VW+i);
-  }
-
-  // f2k consistency check
-  void consistency_check_f2k(block *pre_cot_data, int num) {
-    if(this->party == ALICE) {
-      block r1, r2;
-      vector_self_xor(&r1, this->consist_check_VW, num);
-      bool x_prime[128];
-      this->netio->recv_data(x_prime, 128*sizeof(bool));
-      for(int i = 0; i < 128; ++i) {
-        if(x_prime[i])
-          pre_cot_data[i] = pre_cot_data[i] ^ this->Delta_f2k;
+      Delta_f2k = delta;
+      for(int i = 0; i < tree_n; ++i) {
+        ot->choices_sender();
       }
-      pack.packing(&r2, pre_cot_data);
-      r1 = r1 ^ r2;
-      block dig[2];
-      Hash hash;
-      hash.hash_once(dig, &r1, sizeof(block));
-      this->netio->send_data(dig, 2*sizeof(block));
-      this->netio->flush();
-    } else {
-      block r1, r2, r3;
-      vector_self_xor(&r1, this->consist_check_VW, num);
-      vector_self_xor(&r2, this->consist_check_chi_alpha, num);
-      uint64_t pos[2];
-      pos[0] = _mm_extract_epi64(r2, 0);
-      pos[1] = _mm_extract_epi64(r2, 1);
-      bool pre_cot_bool[128];
-      for(int i = 0; i < 2; ++i) {
-        for(int j = 0; j < 64; ++j) {
-          pre_cot_bool[i*64+j] = ((pos[i] & 1) == 1) ^ getLSB(pre_cot_data[i*64+j]);
-          pos[i] >>= 1;
+      netio->flush();
+      ot->reset();
+      /* exec_parallel_sender(ot, sparse_vector); */
+
+      { // execute the single-point OTs in parallel
+        std::vector<std::thread> ths;
+        int width = (this->tree_n+threads)/(threads+1);	
+        for(int i = 0; i < threads+1; ++i) {
+          int start = i * width;
+          int end = min((i+1)*width, tree_n);
+          ths.emplace_back(std::thread {
+              [this, &consist_check_VW, start, end, width, ot, sparse_vector] {
+            for(int i = start; i < end; ++i) {
+              spcot_send(tree_height, is_malicious, ot, ios[start/width], i, sparse_vector+i*leave_n, Delta_f2k, consist_check_VW.data()+i);
+            }}});
         }
+        for (auto& th : ths) { th.join(); }
       }
-      this->netio->send_data(pre_cot_bool, 128*sizeof(bool));
-      this->netio->flush();
-      pack.packing(&r3, pre_cot_data);
-      r1 = r1 ^ r3;
-      block dig[2];
-      Hash hash;
-      hash.hash_once(dig, &r1, sizeof(block));
-      block recv[2];
-      this->netio->recv_data(recv, 2*sizeof(block));
-      if(!cmpBlock(dig, recv, 2))
-        std::cout << "SPCOT consistency check fails" << std::endl;
+
+    } else {
+      { // init
+        PRG prg;
+        std::set<uint32_t> item_set;
+        uint32_t rdata;
+        item_set.clear();
+        while(item_set.size() < (size_t)this->item_n) {
+          prg.random_data(&rdata, sizeof(uint32_t));
+          item_set.insert(rdata%this->idx_max);
+        }
+        item_pos_recver = std::vector<uint32_t>(item_set.begin(), item_set.end());
+      }
+
+      for(int i = 0; i < tree_n; ++i) {
+        recvers.push_back(new SPCOT_Recver<NetIO>(netio, tree_height));
+        recvers[i]->choice_bit_gen(item_pos_recver[i]%leave_n);
+        ot->choices_recver(recvers[i]->b.get());
+      }
+      netio->flush();
+      ot->reset();
+
+      { // execute the single-point OTs in parallel
+        std::vector<std::thread> ths;
+        int width = (this->tree_n+threads)/(threads+1);
+        for (int i = 0; i < threads+1; ++i) {
+          int start = i * width;
+          int end = min((i+1)*width, tree_n);
+          ths.emplace_back(std::thread {
+              [this, &consist_check_VW, start, end, width, recvers, ot, sparse_vector] {
+            for(int i = start; i < end; ++i) {
+              recvers[i]->compute(
+                  is_malicious, ot, ios[start/width], i, sparse_vector+i*leave_n, consist_check_chi_alpha+i, consist_check_VW.data()+i);
+            }}});
+        }
+
+        for (auto& th : ths) { th.join(); }
+      }
+    }
+
+    if(is_malicious) {
+      // consistency check
+      GaloisFieldPacking pack;
+      if(this->party == ALICE) {
+        block r1, r2;
+        vector_self_xor(&r1, consist_check_VW.data(), tree_n);
+        bool x_prime[128];
+        this->netio->recv_data(x_prime, 128*sizeof(bool));
+        for(int i = 0; i < 128; ++i) {
+          if(x_prime[i])
+            pre_cot_data[i] = pre_cot_data[i] ^ this->Delta_f2k;
+        }
+        pack.packing(&r2, pre_cot_data);
+        r1 = r1 ^ r2;
+        block dig[2];
+        Hash hash;
+        hash.hash_once(dig, &r1, sizeof(block));
+        this->netio->send_data(dig, 2*sizeof(block));
+        this->netio->flush();
+      } else {
+        block r1, r2, r3;
+        vector_self_xor(&r1, consist_check_VW.data(), tree_n);
+        vector_self_xor(&r2, this->consist_check_chi_alpha, tree_n);
+        uint64_t pos[2];
+        pos[0] = _mm_extract_epi64(r2, 0);
+        pos[1] = _mm_extract_epi64(r2, 1);
+        bool pre_cot_bool[128];
+        for(int i = 0; i < 2; ++i) {
+          for(int j = 0; j < 64; ++j) {
+            pre_cot_bool[i*64+j] = ((pos[i] & 1) == 1) ^ getLSB(pre_cot_data[i*64+j]);
+            pos[i] >>= 1;
+          }
+        }
+        this->netio->send_data(pre_cot_bool, 128*sizeof(bool));
+        this->netio->flush();
+        pack.packing(&r3, pre_cot_data);
+        r1 = r1 ^ r3;
+        block dig[2];
+        Hash hash;
+        hash.hash_once(dig, &r1, sizeof(block));
+        block recv[2];
+        this->netio->recv_data(recv, 2*sizeof(block));
+        if(!cmpBlock(dig, recv, 2))
+          std::cout << "SPCOT consistency check fails" << std::endl;
+      }
+    }
+
+    for (auto p : recvers) {
+      delete p;
+    }
+
+    if(party == BOB) {
+      delete[] consist_check_chi_alpha;
     }
   }
 };

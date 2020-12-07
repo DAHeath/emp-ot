@@ -30,6 +30,18 @@ public:
   std::size_t byte_memory_need_inplace(std::size_t ot_need);
 
 private:
+  static constexpr MpDesc REGULAR = {
+    .n = 10608640,
+    .k = 589824,
+    .t = 1295,
+    .bin_sz = 13,
+  };
+  static constexpr MpDesc PRE = {
+    .n = 649728,
+    .k = 36288,
+    .t = 1269,
+    .bin_sz = 9,
+  };
   static constexpr std::size_t N_REG = 10608640;
   static constexpr std::size_t T_REG = 1295;
   static constexpr std::size_t K_REG = 589824;
@@ -38,18 +50,21 @@ private:
   static constexpr std::size_t T_PRE_REG = 1269;
   static constexpr std::size_t K_PRE_REG = 36288;
   static constexpr std::size_t BIN_SZ_PRE_REG = 9;
+  static constexpr std::size_t CONSIST_CHECK_COT_NUM = 128;
 
   std::size_t ot_limit;
 
   std::size_t M;
+  bool malicious;
+  NetIO** ios;
 
   std::vector<block> ot_pre_data;
 
   std::unique_ptr<OTPre<NetIO>> pre_ot;
-  std::unique_ptr<MpcotReg<threads>> mpcot;
 
   void extend(
-      MpcotReg<threads>&, OTPre<NetIO>&, std::size_t n, std::size_t k,
+      OTPre<NetIO>&,
+      const MpDesc&,
       std::span<block> ot_output, std::span<block> ot_input);
 };
 
