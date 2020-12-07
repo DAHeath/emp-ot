@@ -11,13 +11,11 @@ int main(int argc, char** argv) {
     NetIO* ios[threads+1];
     for(int i = 0; i < threads+1; ++i)
       ios[i] = new NetIO(nullptr, port+i);
-    FerretCOT<Role::Sender, threads> ferretcot { ios, false };
-    cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, true)*1e6<<" OTps"<<endl;
-    cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, false)*1e6<<" OTps"<<endl;
+    auto ferretcot = FerretCOT<Role::Sender, threads>::make(ios, false);
+    cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length)*1e6<<" OTps"<<endl;
 
-    ferretcot = { ios, true };
-    cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, true)*1e6<<" OTps"<<endl;
-    cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, false)*1e6<<" OTps"<<endl;
+    ferretcot = FerretCOT<Role::Sender, threads>::make(ios, true);
+    cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length)*1e6<<" OTps"<<endl;
 
 
     for(int i = 0; i < threads+1; ++i) {
@@ -27,12 +25,12 @@ int main(int argc, char** argv) {
     NetIO* ios[threads+1];
     for(int i = 0; i < threads+1; ++i)
       ios[i] = new NetIO("127.0.0.1",port+i);
-    FerretCOT<Role::Receiver, threads> ferretcot { ios, false };
-    cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, true)*1e6<<" OTps"<<endl;
-    cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, false)*1e6<<" OTps"<<endl;
-    ferretcot = { ios, true };
-    cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, true)*1e6<<" OTps"<<endl;
-    cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, false)*1e6<<" OTps"<<endl;
+    auto ferretcot = FerretCOT<Role::Receiver, threads>::make(ios, false);
+    cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length)*1e6<<" OTps"<<endl;
+    /* cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, false)*1e6<<" OTps"<<endl; */
+    ferretcot = FerretCOT<Role::Receiver, threads>::make(ios, true);
+    cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length)*1e6<<" OTps"<<endl;
+    /* cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, false)*1e6<<" OTps"<<endl; */
 
     for(int i = 0; i < threads+1; ++i) {
       delete ios[i];

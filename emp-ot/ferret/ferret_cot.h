@@ -1,11 +1,14 @@
 #ifndef EMP_FERRET_COT_H_
 #define EMP_FERRET_COT_H_
+
 #include "emp-ot/ferret/mpcot_reg.h"
 #include "emp-ot/ferret/base_cot.h"
 #include "emp-ot/ferret/lpn_f2.h"
 #include "emp-ot/ferret/constants.h"
 
 #include "emp-ot/ferret/role.h"
+
+#include <span>
 
 namespace emp {
 
@@ -15,43 +18,42 @@ namespace emp {
  * https://eprint.iacr.org/2020/924.pdf
  *
  */
-template<Role role, int threads>
+template<Role role, std::size_t threads>
 class FerretCOT {
 public:
   NetIO* io;
-  block Delta;
+  block delta;
 
-  int ot_used, ot_limit;
+  static FerretCOT make(NetIO* ios[threads+1], bool malicious = false);
 
-  FerretCOT(NetIO* ios[threads+1], bool malicious = false);
+  void rcot(block *data, std::size_t num);
+  std::size_t rcot_inplace(std::span<block>);
 
-  void setup(BaseCot&, block Deltain);
-  void setup(BaseCot&);
-
-  void rcot(block *data, int num);
-  uint64_t rcot_inplace(block *ot_buffer, int length);
-
-  uint64_t byte_memory_need_inplace(uint64_t ot_need);
+  std::size_t byte_memory_need_inplace(std::size_t ot_need);
 
 private:
-  NetIO **ios;
-  int M;
-  bool is_malicious;
+  static constexpr std::size_t N_REG = 10608640;
+  static constexpr std::size_t T_REG = 1295;
+  static constexpr std::size_t K_REG = 589824;
+  static constexpr std::size_t BIN_SZ_REG = 13;
+  static constexpr std::size_t N_PRE_REG = 649728;
+  static constexpr std::size_t T_PRE_REG = 1269;
+  static constexpr std::size_t K_PRE_REG = 36288;
+  static constexpr std::size_t BIN_SZ_PRE_REG = 9;
+
+  std::size_t ot_limit;
+
+  std::size_t M;
 
   std::vector<block> ot_pre_data;
-  std::vector<block> ot_data;
 
   std::unique_ptr<OTPre<NetIO>> pre_ot;
   std::unique_ptr<ThreadPool> pool;
   std::unique_ptr<MpcotReg<threads>> mpcot;
 
   void extend(
-      int n, int k, NetIO* io,
-      block* ot_output, MpcotReg<threads> *mpfss, OTPre<NetIO> *preot, block *ot_input);
-
-  void extend_f2k(block *ot_buffer);
-
-  void extend_f2k();
+      MpcotReg<threads>&, OTPre<NetIO>&, std::size_t n, std::size_t k,
+      std::span<block> ot_output, std::span<block> ot_input);
 };
 
 #include "emp-ot/ferret/ferret_cot.hpp"

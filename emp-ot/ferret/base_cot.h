@@ -35,8 +35,7 @@ class BaseCot { public:
     if (this->party == ALICE) {
       PRG prg;
       prg.random_block(&ot_delta, 1);
-      ot_delta = ot_delta & minusone;
-      ot_delta = ot_delta ^ one;
+      ot_delta = ot_delta | 0x1;
       bool delta_bool[128];
       block_to_bool(delta_bool, ot_delta);
       iknp->setup_send(delta_bool);
@@ -59,9 +58,9 @@ class BaseCot { public:
       block ch[2];
       ch[0] = zero_block;
       ch[1] = makeBlock(0, 1);
-      for(int i = 0; i < size; ++i)
-        ot_data[i] = 
-          (ot_data[i] & minusone) ^ ch[pre_bool_ini[i]];
+      for(int i = 0; i < size; ++i) {
+        ot_data[i] = (ot_data[i] & minusone) ^ ch[pre_bool_ini[i]];
+      }
       delete[] pre_bool_ini;
     }
   }
@@ -89,27 +88,6 @@ class BaseCot { public:
       delete[] pre_bool_ini;
     }
     delete[] ot_data;
-  }
-
-  // debug
-  bool check_cot(block *data, int len) {
-    if(party == ALICE) {
-      io->send_block(&ot_delta, 1);
-      io->send_block(data, len); 
-      io->flush();
-      return true;
-    } else {
-      block * tmp = new block[len];
-      block ch[2];
-      io->recv_block(ch+1, 1);
-      ch[0] = zero_block;
-      io->recv_block(tmp, len);
-      for(int i = 0; i < len; ++i)
-        tmp[i] = tmp[i] ^ ch[getLSB(data[i])];
-      bool res = cmpBlock(tmp, data, len);
-      delete[] tmp;
-      return res;
-    }
   }
 };
 
