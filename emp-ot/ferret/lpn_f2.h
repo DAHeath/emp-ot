@@ -73,7 +73,6 @@ void lpn(
     }
   };
 
-  vector<std::future<void>> fut;
   int width = n/(threads+1);
   std::vector<std::thread> ths;
   for (int i = 0; i < threads; ++i) {

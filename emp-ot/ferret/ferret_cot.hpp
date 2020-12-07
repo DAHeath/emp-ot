@@ -1,8 +1,63 @@
+template <Role role>
+void base_cot(
+    bool malicious,
+    NetIO* io,
+    block delta,
+    OTPre<NetIO>* pre_ot,
+    int num,
+    block* ot_data,
+    int size) {
+  const auto minusone = makeBlock(0xFFFFFFFFFFFFFFFFLL,0xFFFFFFFFFFFFFFFELL);
+
+  IKNP<NetIO> iknp { io, malicious };
+
+  std::vector<block> buf(size);
+  if constexpr (role == Role::Sender) {
+    bool delta_bool[128];
+    block_to_bool(delta_bool, delta);
+    iknp.setup_send(delta_bool);
+    iknp.send_cot(buf.data(), size);
+    io->flush();
+    for(int i = 0; i < size; ++i)
+      buf[i] = buf[i] & minusone;
+    pre_ot->send_pre(buf.data(), delta);
+
+    iknp.send_cot(ot_data, num);
+    io->flush();
+    for(int i = 0; i < num; ++i) {
+      ot_data[i] = ot_data[i] & minusone;
+    }
+
+
+  } else {
+    iknp.setup_recv();
+    PRG prg;
+    bool *pre_bool_ini = new bool[size];
+    prg.random_bool(pre_bool_ini, size);
+    iknp.recv_cot(buf.data(), pre_bool_ini, size);
+    block ch[2];
+    ch[0] = zero_block;
+    ch[1] = makeBlock(0, 1);
+    for(int i = 0; i < size; ++i) {
+      buf[i] = (buf[i] & minusone) ^ ch[pre_bool_ini[i]];
+    }
+    pre_ot->recv_pre(buf.data(), pre_bool_ini);
+    delete[] pre_bool_ini;
+
+    bool *bool_ini = new bool[num];
+    prg.random_bool(bool_ini, num);
+    iknp.recv_cot(ot_data, bool_ini, num);
+    for(int i = 0; i < num; ++i) {
+      ot_data[i] = (ot_data[i] & minusone) ^ ch[bool_ini[i]];
+    }
+    delete[] bool_ini;
+  }
+}
+
 template <Role role, std::size_t threads>
 FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], bool malicious) {
   FerretCOT out;
   out.io = ios[0];
-  out.pool = std::make_unique<ThreadPool>(threads);
 
   if constexpr (role == Role::Sender) {
     PRG prg;
@@ -10,33 +65,24 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
     out.delta = out.delta | 0x1;
   }
 
-  BaseCot base_cot(role == Role::Sender ? ALICE : BOB, out.io, malicious);
-
-
   // setup
   int party = role == Role::Sender ? ALICE : BOB;
   std::thread thread { [&out, ios, party, malicious] {
-    out.mpcot = std::make_unique<MpcotReg<threads>>(malicious, party, N_REG, T_REG, BIN_SZ_REG, out.pool.get(), ios);
+    out.mpcot = std::make_unique<MpcotReg<threads>>(malicious, party, N_REG, T_REG, BIN_SZ_REG, ios);
     out.pre_ot = std::make_unique<OTPre<NetIO>>(out.io, out.mpcot->tree_height-1, out.mpcot->tree_n);
     out.M = K_REG + out.pre_ot->n + out.mpcot->consist_check_cot_num;
     out.ot_limit = N_REG - out.M;
   }};
 
   out.ot_pre_data.resize(N_PRE_REG);
-  if constexpr (role == Role::Receiver) {
-    base_cot.cot_gen_pre();
-  } else {
-    base_cot.cot_gen_pre(out.delta);
-  }
 
-  MpcotReg<threads> mpcot_ini(malicious, party, N_PRE_REG, T_PRE_REG, BIN_SZ_PRE_REG, out.pool.get(), ios);
+  MpcotReg<threads> mpcot_ini(malicious, party, N_PRE_REG, T_PRE_REG, BIN_SZ_PRE_REG, ios);
   OTPre<NetIO> pre_ot_ini(ios[0], mpcot_ini.tree_height-1, mpcot_ini.tree_n);
 
   std::vector<block> pre_data_ini(K_PRE_REG+mpcot_ini.consist_check_cot_num);
-  memset(out.ot_pre_data.data(), 0, N_PRE_REG*16);
 
-  base_cot.cot_gen(&pre_ot_ini, pre_ot_ini.n);
-  base_cot.cot_gen(pre_data_ini.data(), K_PRE_REG+mpcot_ini.consist_check_cot_num);
+  base_cot<role>(malicious, out.io, out.delta, &pre_ot_ini, pre_ot_ini.n, pre_data_ini.data(), K_PRE_REG+mpcot_ini.consist_check_cot_num);
+
   out.extend(mpcot_ini, pre_ot_ini, N_PRE_REG, K_PRE_REG, out.ot_pre_data, pre_data_ini);
 
   thread.join();
@@ -56,13 +102,7 @@ void FerretCOT<role, threads>::extend(
     mpcot.recver_init();
   }
   mpcot.mpcot(ot_output.data(), &preot, ot_input.data());
-  if constexpr (role == Role::Sender) {
-    lpn<Role::Sender>(
-        n, k, io, threads, ot_output.data(), ot_input.data() + mpcot.consist_check_cot_num);
-  } else {
-    lpn<Role::Receiver>(
-        n, k, io, threads, ot_output.data(), ot_input.data() + mpcot.consist_check_cot_num);
-  }
+  lpn<role>(n, k, io, threads, ot_output.data(), ot_input.data() + mpcot.consist_check_cot_num);
 }
 
 template <Role role, std::size_t threads>

@@ -2,9 +2,7 @@
 #define EMP_FERRET_COT_H_
 
 #include "emp-ot/ferret/mpcot_reg.h"
-#include "emp-ot/ferret/base_cot.h"
 #include "emp-ot/ferret/lpn_f2.h"
-#include "emp-ot/ferret/constants.h"
 
 #include "emp-ot/ferret/role.h"
 
@@ -48,7 +46,6 @@ private:
   std::vector<block> ot_pre_data;
 
   std::unique_ptr<OTPre<NetIO>> pre_ot;
-  std::unique_ptr<ThreadPool> pool;
   std::unique_ptr<MpcotReg<threads>> mpcot;
 
   void extend(
