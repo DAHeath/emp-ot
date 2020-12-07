@@ -5,52 +5,43 @@ void base_cot(
     block delta,
     OTPre* pre_ot,
     int num,
-    block* ot_data,
+    block* buffer,
     int size) {
   const auto minusone = makeBlock(0xFFFFFFFFFFFFFFFFLL,0xFFFFFFFFFFFFFFFELL);
 
   IKNP<NetIO> iknp { io, malicious };
 
-  std::vector<block> buf(size);
+  /* std::vector<block> buf(size); */
+  block* buf = buffer;
+  block* ot_data = buffer + num;
   if constexpr (role == Role::Sender) {
     bool delta_bool[128];
     block_to_bool(delta_bool, delta);
     iknp.setup_send(delta_bool);
-    iknp.send_cot(buf.data(), size);
+    iknp.send_cot(buffer, size+num);
     io->flush();
     for(int i = 0; i < size; ++i)
       buf[i] = buf[i] & minusone;
-    pre_ot->send_pre(buf.data(), delta);
+    pre_ot->send_pre(buf, delta);
 
-    iknp.send_cot(ot_data, num);
-    io->flush();
     for(int i = 0; i < num; ++i) {
       ot_data[i] = ot_data[i] & minusone;
     }
 
 
   } else {
-    iknp.setup_recv();
     PRG prg;
-    bool *pre_bool_ini = new bool[size];
-    prg.random_bool(pre_bool_ini, size);
-    iknp.recv_cot(buf.data(), pre_bool_ini, size);
+    std::unique_ptr<bool[]> pre_bool_ini(new bool[size + num]);
+    prg.random_bool(pre_bool_ini.get(), size + num);
+    iknp.setup_recv();
+    iknp.recv_cot(buffer, pre_bool_ini.get(), size + num);
     block ch[2];
     ch[0] = zero_block;
     ch[1] = makeBlock(0, 1);
-    for(int i = 0; i < size; ++i) {
+    for (int i = 0; i < size + num; ++i) {
       buf[i] = (buf[i] & minusone) ^ ch[pre_bool_ini[i]];
     }
-    pre_ot->recv_pre(buf.data(), pre_bool_ini);
-    delete[] pre_bool_ini;
-
-    bool *bool_ini = new bool[num];
-    prg.random_bool(bool_ini, num);
-    iknp.recv_cot(ot_data, bool_ini, num);
-    for(int i = 0; i < num; ++i) {
-      ot_data[i] = (ot_data[i] & minusone) ^ ch[bool_ini[i]];
-    }
-    delete[] bool_ini;
+    pre_ot->recv_pre(buf, pre_bool_ini.get());
   }
 }
 
@@ -74,7 +65,8 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
 
   OTPre pre_ot_ini(ios[0], BIN_SZ_PRE_REG, T_PRE_REG);
 
-  std::vector<block> pre_data_ini(K_PRE_REG+CONSIST_CHECK_COT_NUM);
+  /* std::vector<block> pre_data_ini(); */
+  std::vector<block> pre_data_ini(pre_ot_ini.n + K_PRE_REG+CONSIST_CHECK_COT_NUM);
 
   base_cot<role>(malicious, out.io, out.delta, &pre_ot_ini, pre_ot_ini.n, pre_data_ini.data(), K_PRE_REG+CONSIST_CHECK_COT_NUM);
 
