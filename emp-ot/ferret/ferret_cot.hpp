@@ -97,9 +97,7 @@ void FerretCOT<role, threads>::extend(
     const MpDesc& desc,
     std::span<block> ot_output,
     std::span<block> ot_input) {
-  int party = role == Role::Sender ? ALICE : BOB;
-  MpcotReg<threads> mpcot(malicious, party, desc, ios);
-  mpcot.mpcot(delta, ot_output.data(), &preot, ot_input.data());
+  mpcot<role, threads>(malicious, desc, ios, delta, ot_output.data(), &preot, ot_input.data());
   lpn<role>(desc.n, desc.k, io, threads, ot_output.data(), ot_input.data() + CONSIST_CHECK_COT_NUM);
 }
 
