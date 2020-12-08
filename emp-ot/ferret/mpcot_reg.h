@@ -84,60 +84,28 @@ void mpcot(
 
 
 
-  if constexpr (role == Role::Sender) {
-    { // execute the single-point OTs in parallel
-      std::vector<std::thread> ths;
-      int width = (tree_n+threads)/(threads+1);	
-      for(int i = 0; i < threads+1; ++i) {
-        int start = i * width;
-        int end = std::min((i+1)*width, tree_n);
-        ths.emplace_back(std::thread {
-            [leave_n, ios, is_malicious, tree_height, delta, &consist_check_VW, start, end, width, ot, sparse_vector] {
-          for(int i = start; i < end; ++i) {
-            spcot_send(tree_height, is_malicious, ot, ios[start/width], i, sparse_vector+i*leave_n, delta, consist_check_VW.data()+i);
-          }}});
-      }
-      for (auto& th : ths) { th.join(); }
-    }
-
-  } else {
-    /* const auto positions = range_subset(desc.n, item_n); */
-
-    /* std::unique_ptr<bool[]> bs(new bool[(tree_height-1)*desc.t]); */
-    /* ot->reset(); */
-
-    /* auto choice_bits = [&](int choice, bool* out) { */
-    /*   for (int i = tree_height-2; i >= 0; --i) { */
-    /*     out[i] = (choice & 1) == 0; */
-    /*     choice >>= 1; */
-    /*   } */
-    /* }; */
-
-    /* for (int i = 0; i < desc.t; ++i) { */
-    /*   choice_bits(positions[i] % leave_n, bs.get() + i*(tree_height-1)); */
-    /* } */
-
-    { // execute the single-point OTs in parallel
-      std::vector<std::thread> ths;
-      int width = (tree_n+threads)/(threads+1);
-      for (int i = 0; i < threads+1; ++i) {
-        int start = i * width;
-        int end = min((i+1)*width, tree_n);
-        ths.emplace_back(std::thread {
-            [&, start, end] {
-          for(int j = start; j < end; ++j) {
-            spcot_recv(
-                tree_height,
-                positions[j]%leave_n,
-                bs.get() + j*(tree_height-1),
-                /* bs[j].get(), */
-                is_malicious, ot, ios[start/width], j, sparse_vector+j*leave_n, consist_check_chi_alpha.data()+j, consist_check_VW.data()+j);
-          }}});
-      }
-
-      for (auto& th : ths) { th.join(); }
-    }
+  // execute the single-point OTs in parallel
+  std::vector<std::thread> ths;
+  int width = (tree_n+threads)/(threads+1);	
+  for(int i = 0; i < threads+1; ++i) {
+    int start = i * width;
+    int end = std::min((i+1)*width, tree_n);
+    ths.emplace_back(std::thread {
+        [&, start, end] {
+      for(int j = start; j < end; ++j) {
+        if constexpr (role == Role::Sender) {
+        spcot_send(tree_height, is_malicious, ot, ios[start/width], j, sparse_vector+j*leave_n, delta, consist_check_VW.data()+j);
+        } else {
+          spcot_recv(
+              tree_height,
+              positions[j]%leave_n,
+              bs.get() + j*(tree_height-1),
+              /* bs[j].get(), */
+              is_malicious, ot, ios[start/width], j, sparse_vector+j*leave_n, consist_check_chi_alpha.data()+j, consist_check_VW.data()+j);
+        }
+      }}});
   }
+  for (auto& th : ths) { th.join(); }
 
   if (is_malicious) {
     // consistency check
