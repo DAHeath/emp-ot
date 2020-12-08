@@ -7,21 +7,6 @@
 
 using namespace emp;
 
-/* template<typename IO> */
-/* class SPCOT_Recver { */
-/* public: */
-// generate the choice bit of blivious transfer
-std::unique_ptr<bool[]> choice_bit_gen(int depth, int choice_pos) {
-  std::unique_ptr<bool[]> b(new bool[depth-1]);
-  assert(choice_pos > (1 << (depth-1)));
-  int idx = choice_pos--;
-  for(int i = depth-2; i >= 0; --i) {
-    b[i] = (idx % 2) == 0;
-    idx >>= 1;
-  }
-  return b;
-}
-
 // receive the message and reconstruct the tree
 // j: position of the secret, begins from 0
 template <typename OT>

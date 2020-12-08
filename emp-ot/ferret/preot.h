@@ -3,6 +3,7 @@
 #include "emp-tool/emp-tool.h"
 #include "emp-ot/emp-ot.h"
 #include "emp-ot/ferret/role.h"
+#include <span>
 
 namespace emp {
 
@@ -28,35 +29,30 @@ public:
       pre_data(2*n),
       bits(new bool[n]) { }
 
-  void send_pre(block * data, block delta) {
-    ccrh.Hn(pre_data.data(), data, 0, n, pre_data.data()+n);
-    xorBlocks_arr(pre_data.data()+n, data, delta, n);
-    ccrh.Hn(pre_data.data()+n, pre_data.data()+n, 0, n);
-  }
-
-  void recv_pre(block * data, bool * b) {
-    memcpy(bits.get(), b, n);
-    ccrh.Hn(pre_data.data(), data, 0, n);
-  }
-
-  void recv_pre(block * data) {
-    for(int i = 0; i < n; ++i) {
-      bits[i] = getLSB(data[i]);
+  void pre(std::span<block> data, block delta) {
+    if constexpr (role == Role::Sender) {
+      ccrh.Hn(pre_data.data(), data.data(), 0, n, pre_data.data()+n);
+      xorBlocks_arr(pre_data.data()+n, data.data(), delta, n);
+      ccrh.Hn(pre_data.data()+n, pre_data.data()+n, 0, n);
+    } else {
+      for(int i = 0; i < n; ++i) {
+        bits[i] = getLSB(data[i]);
+      }
+      ccrh.Hn(pre_data.data(), data.data(), 0, n);
     }
-    ccrh.Hn(pre_data.data(), data, 0, n);
   }
 
-  void choices_sender() {
-    io->recv_data(bits.get()+count, length);
-    count += length;
-  }
-
-  void choices_recver(const bool * b) {
-    for (int i = 0; i < length; ++i) {
-      bits[count + i] = (b[i] != bits[count + i]);
+  void choose(NetIO* io, const bool* b, std::size_t n) {
+    if constexpr (role == Role::Sender) {
+      io->recv_data(bits.get()+count, n);
+      count += n;
+    } else {
+      for (int i = 0; i < n; ++i) {
+        bits[count + i] = (b[i] != bits[count + i]);
+      }
+      io->send_data(bits.get()+count, n);
+      count +=n;
     }
-    io->send_data(bits.get()+count, length);
-    count +=length;
   }
 
   void reset() {

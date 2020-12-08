@@ -65,14 +65,9 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
     choices = bools_r(num);
   }
 
-  auto pre_data_ini = base_cot<role>(malicious, out.io, out.delta, choices.get(), num);
-  if constexpr (role == Role::Sender) {
-    pre_ot_ini.send_pre(pre_data_ini.data(), out.delta);
-  } else {
-    pre_ot_ini.recv_pre(pre_data_ini.data(), choices.get());
-  }
-
-  out.extend(pre_ot_ini, PRE, out.ot_pre_data, pre_data_ini);
+  auto init = base_cot<role>(malicious, out.io, out.delta, choices.get(), num);
+  pre_ot_ini.pre(init, out.delta);
+  out.extend(pre_ot_ini, PRE, out.ot_pre_data, init);
 
   return out;
 }
@@ -106,11 +101,7 @@ std::size_t FerretCOT<role, threads>::rcot_inplace(std::span<block> buf) {
   std::size_t ot_output_n = buf.size() - M;
   std::size_t round = ot_output_n / ot_limit;
   for (std::size_t i = 0; i < round; ++i) {
-    if constexpr (role == Role::Sender) {
-      pre_ot.send_pre(ot_pre_data.data(), delta);
-    } else {
-      pre_ot.recv_pre(ot_pre_data.data());
-    }
+    pre_ot.pre(ot_pre_data, delta);
     extend(pre_ot, REGULAR, buf, ot_pre_data);
     buf = buf.subspan(ot_limit);
     std::copy(buf.begin(), buf.begin() + M, ot_pre_data.begin());

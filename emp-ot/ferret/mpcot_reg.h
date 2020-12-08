@@ -3,6 +3,7 @@
 
 #include <emp-tool/emp-tool.h>
 #include <set>
+#include <unordered_set>
 #include "emp-ot/ferret/spcot.h"
 #include "emp-ot/ferret/preot.h"
 #include "emp-ot/ferret/role.h"
@@ -17,6 +18,27 @@ struct MpDesc {
 };
 
 
+// Select a random size n subset of the range [0..cap)
+std::vector<std::uint32_t> range_subset(std::uint32_t cap, std::size_t n) {
+  PRG prg;
+  std::uint32_t xs[4];
+  std::unordered_set<std::uint32_t> s;
+  while (s.size() < n) {
+    // prg produces 128 bits per call, so fill four words at once
+    prg.random_data(xs, sizeof(std::uint32_t)*4);
+    s.insert(xs[0] % cap);
+    s.insert(xs[1] % cap);
+    s.insert(xs[2] % cap);
+    s.insert(xs[3] % cap);
+  }
+  while (s.size() > n) {
+    // we might overfill, so trim back to desired size (max overshoot is only three).
+    s.erase(s.begin());
+  }
+  return std::vector<std::uint32_t>(s.begin(), s.end());
+}
+
+
 // MPFSS F_2k
 template<Role role, std::size_t threads>
 void mpcot(
@@ -24,13 +46,9 @@ void mpcot(
     block delta, block * sparse_vector, OTPre<role>* ot, block *pre_cot_data) {
   auto netio = ios[0];
   auto item_n = desc.t;
-  auto idx_max = desc.n;
   auto tree_height = desc.bin_sz+1;
   int leave_n = 1<<(tree_height-1);
   int tree_n = item_n;
-  std::vector<uint32_t> item_pos_recver;
-
-
 
   std::vector<block> consist_check_chi_alpha;;
   if constexpr(role == Role::Receiver) {
@@ -38,13 +56,35 @@ void mpcot(
   }
   std::vector<block> consist_check_VW(item_n);
 
-  if constexpr (role == Role::Sender) {
-    for(int i = 0; i < tree_n; ++i) {
-      ot->choices_sender();
-    }
-    netio->flush();
-    ot->reset();
 
+  std::unique_ptr<bool[]> bs(new bool[(tree_height-1)*desc.t]);
+  std::vector<std::uint32_t> positions;
+  { // make single point ot choices
+    ot->reset();
+    if constexpr (role == Role::Receiver) {
+      positions = range_subset(desc.n, item_n);
+
+      bs = std::unique_ptr<bool[]>(new bool[(tree_height-1)*desc.t]);
+
+      auto choice_bits = [&](int choice, bool* out) {
+        for (int i = tree_height-2; i >= 0; --i) {
+          out[i] = (choice & 1) == 0;
+          choice >>= 1;
+        }
+      };
+
+      for (int i = 0; i < desc.t; ++i) {
+        choice_bits(positions[i] % leave_n, bs.get() + i*(tree_height-1));
+      }
+    }
+    ot->choose(netio, bs.get(), (tree_height-1)*desc.t);
+    netio->flush();
+  }
+
+
+
+
+  if constexpr (role == Role::Sender) {
     { // execute the single-point OTs in parallel
       std::vector<std::thread> ths;
       int width = (tree_n+threads)/(threads+1);	
@@ -61,25 +101,21 @@ void mpcot(
     }
 
   } else {
-    { // init
-      PRG prg;
-      std::set<uint32_t> item_set;
-      uint32_t rdata;
-      item_set.clear();
-      while(item_set.size() < (size_t)item_n) {
-        prg.random_data(&rdata, sizeof(uint32_t));
-        item_set.insert(rdata%idx_max);
-      }
-      item_pos_recver = std::vector<uint32_t>(item_set.begin(), item_set.end());
-    }
+    /* const auto positions = range_subset(desc.n, item_n); */
 
-    std::vector<std::unique_ptr<bool[]>> bs;
-    for(int i = 0; i < desc.t; ++i) {
-      bs.emplace_back(choice_bit_gen(tree_height, item_pos_recver[i]%leave_n));
-      ot->choices_recver(bs.back().get());
-    }
-    netio->flush();
-    ot->reset();
+    /* std::unique_ptr<bool[]> bs(new bool[(tree_height-1)*desc.t]); */
+    /* ot->reset(); */
+
+    /* auto choice_bits = [&](int choice, bool* out) { */
+    /*   for (int i = tree_height-2; i >= 0; --i) { */
+    /*     out[i] = (choice & 1) == 0; */
+    /*     choice >>= 1; */
+    /*   } */
+    /* }; */
+
+    /* for (int i = 0; i < desc.t; ++i) { */
+    /*   choice_bits(positions[i] % leave_n, bs.get() + i*(tree_height-1)); */
+    /* } */
 
     { // execute the single-point OTs in parallel
       std::vector<std::thread> ths;
@@ -92,8 +128,9 @@ void mpcot(
           for(int j = start; j < end; ++j) {
             spcot_recv(
                 tree_height,
-                item_pos_recver[j]%leave_n,
-                bs[j].get(),
+                positions[j]%leave_n,
+                bs.get() + j*(tree_height-1),
+                /* bs[j].get(), */
                 is_malicious, ot, ios[start/width], j, sparse_vector+j*leave_n, consist_check_chi_alpha.data()+j, consist_check_VW.data()+j);
           }}});
       }
