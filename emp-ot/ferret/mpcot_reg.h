@@ -21,7 +21,7 @@ struct MpDesc {
 template<Role role, std::size_t threads>
 void mpcot(
   bool is_malicious, const MpDesc& desc, NetIO* ios[threads+1],
-    block delta, block * sparse_vector, OTPre* ot, block *pre_cot_data) {
+    block delta, block * sparse_vector, OTPre<role>* ot, block *pre_cot_data) {
   auto netio = ios[0];
   auto item_n = desc.t;
   auto idx_max = desc.n;

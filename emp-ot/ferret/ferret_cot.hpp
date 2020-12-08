@@ -1,48 +1,41 @@
+std::unique_ptr<bool[]> bools_r(std::size_t n) {
+  PRG prg;
+  std::unique_ptr<bool[]> out(new bool[n]);
+  prg.random_bool(out.get(), n);
+  return out;
+}
+
 template <Role role>
-void base_cot(
+std::vector<block> base_cot(
     bool malicious,
     NetIO* io,
     block delta,
-    OTPre* pre_ot,
-    int num,
-    block* buffer,
-    int size) {
+    bool* choices,
+    std::size_t n) {
   const auto minusone = makeBlock(0xFFFFFFFFFFFFFFFFLL,0xFFFFFFFFFFFFFFFELL);
 
   IKNP<NetIO> iknp { io, malicious };
 
-  /* std::vector<block> buf(size); */
-  block* buf = buffer;
-  block* ot_data = buffer + num;
+  std::vector<block> buffer(n);
   if constexpr (role == Role::Sender) {
-    bool delta_bool[128];
-    block_to_bool(delta_bool, delta);
-    iknp.setup_send(delta_bool);
-    iknp.send_cot(buffer, size+num);
+    iknp.setup_send(delta);
+    iknp.send_cot(buffer.data(), n);
     io->flush();
-    for(int i = 0; i < size; ++i)
-      buf[i] = buf[i] & minusone;
-    pre_ot->send_pre(buf, delta);
-
-    for(int i = 0; i < num; ++i) {
-      ot_data[i] = ot_data[i] & minusone;
+    for(int i = 0; i < n; ++i) {
+      buffer[i] = buffer[i] & minusone;
     }
 
-
   } else {
-    PRG prg;
-    std::unique_ptr<bool[]> pre_bool_ini(new bool[size + num]);
-    prg.random_bool(pre_bool_ini.get(), size + num);
     iknp.setup_recv();
-    iknp.recv_cot(buffer, pre_bool_ini.get(), size + num);
+    iknp.recv_cot(buffer.data(), choices, n);
     block ch[2];
     ch[0] = zero_block;
     ch[1] = makeBlock(0, 1);
-    for (int i = 0; i < size + num; ++i) {
-      buf[i] = (buf[i] & minusone) ^ ch[pre_bool_ini[i]];
+    for (int i = 0; i < n; ++i) {
+      buffer[i] = (buffer[i] & minusone) ^ ch[choices[i]];
     }
-    pre_ot->recv_pre(buf, pre_bool_ini.get());
   }
+  return buffer;
 }
 
 template <Role role, std::size_t threads>
@@ -58,21 +51,28 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
     out.delta = out.delta | 0x1;
   }
 
-  out.pre_ot = std::make_unique<OTPre>(out.io, BIN_SZ_REG, T_REG);
-  out.M = K_REG + out.pre_ot->n + CONSIST_CHECK_COT_NUM;
+  out.pre_ot = OTPre<role>(out.io, BIN_SZ_REG, T_REG);
+  out.M = K_REG + out.pre_ot.n + CONSIST_CHECK_COT_NUM;
   out.ot_limit = N_REG - out.M;
   out.ot_pre_data.resize(N_PRE_REG);
 
-  OTPre pre_ot_ini(ios[0], BIN_SZ_PRE_REG, T_PRE_REG);
+  OTPre<role> pre_ot_ini(ios[0], BIN_SZ_PRE_REG, T_PRE_REG);
 
-  /* std::vector<block> pre_data_ini(); */
-  std::vector<block> pre_data_ini(pre_ot_ini.n + K_PRE_REG+CONSIST_CHECK_COT_NUM);
+  std::size_t num = pre_ot_ini.n + K_PRE_REG + CONSIST_CHECK_COT_NUM;
 
-  base_cot<role>(malicious, out.io, out.delta, &pre_ot_ini, pre_ot_ini.n, pre_data_ini.data(), K_PRE_REG+CONSIST_CHECK_COT_NUM);
+  std::unique_ptr<bool[]> choices;
+  if constexpr (role == Role::Receiver) {
+    choices = bools_r(num);
+  }
+
+  auto pre_data_ini = base_cot<role>(malicious, out.io, out.delta, choices.get(), num);
+  if constexpr (role == Role::Sender) {
+    pre_ot_ini.send_pre(pre_data_ini.data(), out.delta);
+  } else {
+    pre_ot_ini.recv_pre(pre_data_ini.data(), choices.get());
+  }
 
   out.extend(pre_ot_ini, PRE, out.ot_pre_data, pre_data_ini);
-
-  /* thread.join(); */
 
   return out;
 }
@@ -81,7 +81,7 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
 // extend f2k in detail
 template <Role role, std::size_t threads>
 void FerretCOT<role, threads>::extend(
-    OTPre& preot,
+    OTPre<role>& preot,
     const MpDesc& desc,
     std::span<block> ot_output,
     std::span<block> ot_input) {
@@ -107,11 +107,11 @@ std::size_t FerretCOT<role, threads>::rcot_inplace(std::span<block> buf) {
   std::size_t round = ot_output_n / ot_limit;
   for (std::size_t i = 0; i < round; ++i) {
     if constexpr (role == Role::Sender) {
-      pre_ot->send_pre(ot_pre_data.data(), delta);
+      pre_ot.send_pre(ot_pre_data.data(), delta);
     } else {
-      pre_ot->recv_pre(ot_pre_data.data());
+      pre_ot.recv_pre(ot_pre_data.data());
     }
-    extend(*pre_ot, REGULAR, buf, ot_pre_data);
+    extend(pre_ot, REGULAR, buf, ot_pre_data);
     buf = buf.subspan(ot_limit);
     std::copy(buf.begin(), buf.begin() + M, ot_pre_data.begin());
   }

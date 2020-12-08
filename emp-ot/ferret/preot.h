@@ -2,8 +2,11 @@
 #define  _PRE_OT__
 #include "emp-tool/emp-tool.h"
 #include "emp-ot/emp-ot.h"
-using namespace emp;
+#include "emp-ot/ferret/role.h"
 
+namespace emp {
+
+template <Role role>
 class OTPre {
 public:
   NetIO* io;
@@ -14,6 +17,8 @@ public:
   std::unique_ptr<bool[]> bits;
 
   CCRH ccrh;
+
+  OTPre() { }
 
   OTPre(NetIO* io, int length, int times)
     : io(io),
@@ -85,4 +90,6 @@ public:
     }
   }
 };
+
+}
 #endif// _PRE_OT__

@@ -60,10 +60,10 @@ private:
 
   std::vector<block> ot_pre_data;
 
-  std::unique_ptr<OTPre> pre_ot;
+  OTPre<role> pre_ot;
 
   void extend(
-      OTPre&,
+      OTPre<role>&,
       const MpDesc&,
       std::span<block> ot_output, std::span<block> ot_input);
 };
