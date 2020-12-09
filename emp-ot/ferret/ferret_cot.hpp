@@ -5,6 +5,22 @@ std::unique_ptr<bool[]> bools_r(std::size_t n) {
   return out;
 }
 
+
+template <Role role>
+block seed_gen(NetIO& io) {
+  block seed;
+  if constexpr (role == Role::Sender) {
+    PRG prg;
+    prg.random_block(&seed, 1);
+    io.send_data(&seed, sizeof(block));
+  } else {
+    io.recv_data(&seed, sizeof(block));
+  }
+  io.flush();
+  return seed;
+}
+
+
 template <Role role>
 std::vector<block> base_cot(
     bool malicious,
@@ -38,6 +54,7 @@ std::vector<block> base_cot(
   return buffer;
 }
 
+
 template <Role role, std::size_t threads>
 FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], bool malicious) {
   FerretCOT out;
@@ -51,10 +68,10 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
     out.delta = out.delta | 0x1;
   }
 
-  out.pre_ot = OTPre<role>(out.io, REGULAR.bin_sz * REGULAR.t);
+  out.pre_ot = OTPre<role>(REGULAR.bin_sz * REGULAR.t);
   out.ot_pre_data.resize(PRE.n);
 
-  OTPre<role> pre_ot_ini(ios[0], PRE.bin_sz * PRE.t);
+  OTPre<role> pre_ot_ini(PRE.bin_sz * PRE.t);
 
   std::unique_ptr<bool[]> choices;
   if constexpr (role == Role::Receiver) {
@@ -66,21 +83,6 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
   out.extend(pre_ot_ini, PRE, out.ot_pre_data, init);
 
   return out;
-}
-
-
-template <Role role>
-block seed_gen(NetIO& io) {
-  block seed;
-  if constexpr (role == Role::Sender) {
-    PRG prg;
-    prg.random_block(&seed, 1);
-    io.send_data(&seed, sizeof(block));
-  } else {
-    io.recv_data(&seed, sizeof(block));
-  }
-  io.flush();
-  return seed;
 }
 
 
@@ -96,11 +98,13 @@ void FerretCOT<role, threads>::extend(
   lpn<role>(desc, seed, threads, ot_output.data(), ot_input.data() + CONSIST_CHECK_COT_NUM);
 }
 
+
 template <Role role, std::size_t threads>
 std::size_t FerretCOT<role, threads>::byte_memory_need_inplace(std::size_t ot_need) {
   std::size_t round = (ot_need - 1) / REGULAR.limit;
   return round * REGULAR.limit + REGULAR.n;
 }
+
 
 // extend f2k (benchmark)
 // parameter "length" should be the return of "byte_memory_need_inplace"

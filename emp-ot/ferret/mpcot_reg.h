@@ -63,7 +63,6 @@ void mpcot(
   std::unique_ptr<bool[]> bs(new bool[(tree_height-1)*desc.t]);
   std::vector<std::uint32_t> positions;
   { // make single point ot choices
-    ot->reset();
     if constexpr (role == Role::Receiver) {
       positions = range_subset(desc.n, desc.t);
 

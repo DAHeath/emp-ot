@@ -10,9 +10,6 @@ namespace emp {
 template <Role role>
 class OTPre {
 public:
-  NetIO* io;
-  int length;
-  int count;
   int n;
   std::vector<block> pre_data;
   std::unique_ptr<bool[]> bits;
@@ -21,10 +18,8 @@ public:
 
   OTPre() { }
 
-  OTPre(NetIO* io, int n)
-    : io(io),
-      count(0),
-      n(n),
+  OTPre(int n)
+    : n(n),
       pre_data(2*n),
       bits(new bool[n]) { }
 
@@ -43,19 +38,13 @@ public:
 
   void choose(NetIO* io, const bool* b, std::size_t n) {
     if constexpr (role == Role::Sender) {
-      io->recv_data(bits.get()+count, n);
-      count += n;
+      io->recv_data(bits.get(), n);
     } else {
       for (int i = 0; i < n; ++i) {
-        bits[count + i] = (b[i] != bits[count + i]);
+        bits[i] = (b[i] != bits[i]);
       }
-      io->send_data(bits.get()+count, n);
-      count +=n;
+      io->send_data(bits.get(), n);
     }
-  }
-
-  void reset() {
-    count = 0;
   }
 
   void send(const block * m0, const  block * m1, int length, NetIO * io2, int s) {
