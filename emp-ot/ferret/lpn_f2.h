@@ -22,7 +22,8 @@ constexpr int mkMask(int k) {
 template<Role role, int d = 10>
 void lpn(
     const MpDesc& desc, const block& seed, int threads,
-    block * nn, const block * kk) {
+    std::span<block> nn,
+    std::span<const block> kk) {
 
   const auto task = [=](int start, int end) {
     PRP prp(seed);

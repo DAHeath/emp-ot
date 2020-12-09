@@ -4,27 +4,22 @@
 #include "emp-tool/emp-tool.h"
 #include "emp-ot/emp-ot.h"
 #include "emp-ot/ferret/twokeyprp.h"
+#include <span>
 
 using namespace emp;
 
 // receive the message and reconstruct the tree
 // j: position of the secret, begins from 0
-template <typename OT>
 void spcot_recv(
+    std::span<block> m,
+    block secret_sum_f2,
     int depth,
     int choice_pos,
     bool* b,
     bool malicious,
-    OT * ot,
-    NetIO * io2,
-    int s,
     block* ggm_tree,
     block *chi_alpha,
     block *W) {
-  std::vector<block> m(depth-1);
-  ot->recv(m.data(), b, depth-1, io2, s);
-  block secret_sum_f2;
-  io2->recv_data(&secret_sum_f2, sizeof(block));
   int leave_n = 1<<(depth-1);
 
   { // gmm tree reconstruction
@@ -75,15 +70,11 @@ void spcot_recv(
 }
 
 // generate GGM tree, transfer secret, F2^k
-template <typename OT>
-void spcot_send(
+std::pair<block, std::vector<block>> spcot_send(
     int depth,
     bool malicious,
-    OT* ot,
-    NetIO* io,
-    int s,
     block* ggm_tree,
-    block secret,
+    block delta,
     block* V) {
   PRG prg;
   block seed;
@@ -118,12 +109,8 @@ void spcot_send(
     ggm_tree[i] = ggm_tree[i] & one;
     secret_sum_f2 = secret_sum_f2 ^ ggm_tree[i];
   }
-  secret_sum_f2 = secret_sum_f2 ^ secret;
+  secret_sum_f2 = secret_sum_f2 ^ delta;
 
-
-  ot->send(m.data(), &m[depth-1], depth-1, io, s);
-  io->send_data(&secret_sum_f2, sizeof(block));
-  io->flush();
 
   if (malicious) {
     // consistency check
@@ -135,6 +122,8 @@ void spcot_send(
 
     vector_inn_prdt_sum_red(V, chi.data(), ggm_tree, leave_n);
   }
+
+  return { secret_sum_f2, m };
 }
 
 #endif

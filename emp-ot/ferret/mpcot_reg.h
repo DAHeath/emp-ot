@@ -48,7 +48,9 @@ std::vector<std::uint32_t> range_subset(std::uint32_t cap, std::size_t n) {
 template<Role role, std::size_t threads>
 void mpcot(
   bool is_malicious, const MpDesc& desc, NetIO* ios[threads+1],
-    block delta, block * sparse_vector, OTPre<role>* ot, block *pre_cot_data) {
+    block delta,
+    block * sparse_vector,
+    std::span<block> pre_cot_data) {
   auto netio = ios[0];
   auto tree_height = desc.bin_sz+1;
   int leave_n = 1<<(tree_height-1);
@@ -62,26 +64,28 @@ void mpcot(
 
   std::unique_ptr<bool[]> bs(new bool[(tree_height-1)*desc.t]);
   std::vector<std::uint32_t> positions;
-  { // make single point ot choices
-    if constexpr (role == Role::Receiver) {
-      positions = range_subset(desc.n, desc.t);
+  // make single point ot choices
+  if constexpr (role == Role::Receiver) {
+    positions = range_subset(desc.n, desc.t);
 
-      bs = std::unique_ptr<bool[]>(new bool[(tree_height-1)*desc.t]);
+    bs = std::unique_ptr<bool[]>(new bool[(tree_height-1)*desc.t]);
 
-      auto choice_bits = [&](int choice, bool* out) {
-        for (int i = tree_height-2; i >= 0; --i) {
-          out[i] = (choice & 1) == 0;
-          choice >>= 1;
-        }
-      };
-
-      for (int i = 0; i < desc.t; ++i) {
-        choice_bits(positions[i] % leave_n, bs.get() + i*(tree_height-1));
+    auto choice_bits = [&](int choice, bool* out) {
+      for (int i = tree_height-2; i >= 0; --i) {
+        out[i] = (choice & 1) == 0;
+        choice >>= 1;
       }
+    };
+
+    for (int i = 0; i < desc.t; ++i) {
+      choice_bits(positions[i] % leave_n, bs.get() + i*(tree_height-1));
     }
-    ot->choose(netio, bs.get(), (tree_height-1)*desc.t);
-    netio->flush();
   }
+
+  OTPre<role> ot(desc.bin_sz * desc.t);
+  ot.pre(pre_cot_data, delta);
+  ot.choose(netio, bs.get(), (tree_height-1)*desc.t);
+  netio->flush();
 
   // execute the single-point OTs in parallel
   std::vector<std::thread> ths;
@@ -89,28 +93,33 @@ void mpcot(
   for(int i = 0; i < threads+1; ++i) {
     int start = i * width;
     int end = std::min((std::size_t)(i+1)*width, desc.t);
-    ths.emplace_back(std::thread {
-        [&, start, end] {
+    ths.emplace_back(std::thread { [&, start, end] {
       for(int j = start; j < end; ++j) {
         if constexpr (role == Role::Sender) {
-          spcot_send(
+          auto [secret_sum_f2, m] = spcot_send(
               tree_height,
               is_malicious,
-              ot,
-              ios[start/width],
-              j,
               sparse_vector+j*leave_n,
               delta,
               consist_check_VW.data()+j);
+          auto io = ios[start/width];
+          ot.send(m.data(), &m[tree_height-1], tree_height-1, io, j);
+          io->send_data(&secret_sum_f2, sizeof(block));
+          io->flush();
         } else {
+          auto io = ios[start/width];
+          std::vector<block> m(tree_height-1);
+          ot.recv(m.data(), bs.get() + j*(tree_height-1), tree_height-1, io, j);
+          block secret_sum_f2;
+          io->recv_data(&secret_sum_f2, sizeof(block));
+
           spcot_recv(
+              m,
+              secret_sum_f2,
               tree_height,
               positions[j]%leave_n,
               bs.get() + j*(tree_height-1),
               is_malicious,
-              ot,
-              ios[start/width],
-              j,
               sparse_vector+j*leave_n,
               consist_check_chi_alpha.data()+j,
               consist_check_VW.data()+j);
@@ -131,7 +140,7 @@ void mpcot(
         if(x_prime[i])
           pre_cot_data[i] = pre_cot_data[i] ^ delta;
       }
-      pack.packing(&r2, pre_cot_data);
+      pack.packing(&r2, pre_cot_data.data());
       r1 = r1 ^ r2;
       block dig[2];
       Hash hash;
@@ -154,7 +163,7 @@ void mpcot(
       }
       netio->send_data(pre_cot_bool, 128*sizeof(bool));
       netio->flush();
-      pack.packing(&r3, pre_cot_data);
+      pack.packing(&r3, pre_cot_data.data());
       r1 = r1 ^ r3;
       block dig[2];
       Hash hash;

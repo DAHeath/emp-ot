@@ -68,10 +68,7 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
     out.delta = out.delta | 0x1;
   }
 
-  out.pre_ot = OTPre<role>(REGULAR.bin_sz * REGULAR.t);
   out.ot_pre_data.resize(PRE.n);
-
-  OTPre<role> pre_ot_ini(PRE.bin_sz * PRE.t);
 
   std::unique_ptr<bool[]> choices;
   if constexpr (role == Role::Receiver) {
@@ -79,8 +76,7 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
   }
 
   auto init = base_cot<role>(malicious, out.io, out.delta, choices.get(), PRE.m);
-  pre_ot_ini.pre(init, out.delta);
-  out.extend(pre_ot_ini, PRE, out.ot_pre_data, init);
+  out.extend(PRE, out.ot_pre_data, init);
 
   return out;
 }
@@ -89,13 +85,12 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
 // extend f2k in detail
 template <Role role, std::size_t threads>
 void FerretCOT<role, threads>::extend(
-    OTPre<role>& preot,
     const MpDesc& desc,
     std::span<block> ot_output,
     std::span<block> ot_input) {
-  mpcot<role, threads>(malicious, desc, ios, delta, ot_output.data(), &preot, ot_input.data());
+  mpcot<role, threads>(malicious, desc, ios, delta, ot_output.data(), ot_input);
   const block seed = seed_gen<role>(*io);
-  lpn<role>(desc, seed, threads, ot_output.data(), ot_input.data() + CONSIST_CHECK_COT_NUM);
+  lpn<role>(desc, seed, threads, ot_output, ot_input.subspan(CONSIST_CHECK_COT_NUM));
 }
 
 
@@ -117,8 +112,7 @@ std::size_t FerretCOT<role, threads>::rcot_inplace(std::span<block> buf) {
   std::size_t ot_output_n = buf.size() - REGULAR.m;
   std::size_t round = ot_output_n / REGULAR.limit;
   for (std::size_t i = 0; i < round; ++i) {
-    pre_ot.pre(ot_pre_data, delta);
-    extend(pre_ot, REGULAR, buf, ot_pre_data);
+    extend(REGULAR, buf, ot_pre_data);
     buf = buf.subspan(REGULAR.limit);
     std::copy(buf.begin(), buf.begin() + REGULAR.m, ot_pre_data.begin());
   }

@@ -19,7 +19,6 @@ namespace emp {
 template<Role role, std::size_t threads>
 class FerretCOT {
 public:
-  NetIO* io;
   block delta;
 
   static FerretCOT make(NetIO* ios[threads+1], bool malicious = false);
@@ -49,22 +48,19 @@ private:
     .limit = 649728 - (36288 + 9*1269 + CONSIST_CHECK_COT_NUM),
   };
 
-  std::size_t ot_limit;
-
-  std::size_t M;
+  NetIO* io;
   bool malicious;
   NetIO** ios;
 
   std::vector<block> ot_pre_data;
 
-  OTPre<role> pre_ot;
-
   void extend(
-      OTPre<role>&,
       const MpDesc&,
-      std::span<block> ot_output, std::span<block> ot_input);
+      std::span<block> ot_output,
+      std::span<block> ot_input);
 };
 
 #include "emp-ot/ferret/ferret_cot.hpp"
 }
+
 #endif// _VOLE_H_
