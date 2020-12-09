@@ -87,9 +87,14 @@ void mpcot(
   ot.choose(netio, bs.get(), (tree_height-1)*desc.t);
   netio->flush();
 
+  if (role == Role::Receiver) {
+  }
+
+
+
   // execute the single-point OTs in parallel
   std::vector<std::thread> ths;
-  int width = (desc.t+threads)/(threads+1);	
+  int width = (desc.t+threads)/(threads+1);
   for(int i = 0; i < threads+1; ++i) {
     int start = i * width;
     int end = std::min((std::size_t)(i+1)*width, desc.t);
@@ -103,13 +108,35 @@ void mpcot(
               delta,
               consist_check_VW.data()+j);
           auto io = ios[start/width];
-          ot.send(m.data(), &m[tree_height-1], tree_height-1, io, j);
+
+          auto m0 = m.data();
+          auto m1 = &m[tree_height-1];
+          auto length = tree_height-1;
+          std::vector<block> pad(2*length);
+          int k = j*length;
+          for (int i = 0; i < length; ++i) {
+            pad[2*i] = m0[i] ^ ot.pre_data[k+i + ot.bits[k+i]*ot.n];
+            pad[2*i+1] = m1[i] ^ ot.pre_data[k+i + (!ot.bits[k+i])*ot.n];
+          }
+          io->send_block(pad.data(), 2*length);
           io->send_data(&secret_sum_f2, sizeof(block));
           io->flush();
         } else {
           auto io = ios[start/width];
           std::vector<block> m(tree_height-1);
-          ot.recv(m.data(), bs.get() + j*(tree_height-1), tree_height-1, io, j);
+
+          {
+            auto length = tree_height-1;
+            auto b = bs.get() + j*(tree_height-1);
+            int k = j*length;
+            std::vector<block> pad(2*length);
+            io->recv_block(pad.data(), 2*length);
+            for (int i = 0; i < length; ++i) {
+              m[i] = ot.pre_data[k+i] ^ pad[2*i + b[i]];
+            }
+          }
+
+          /* ot.recv(m.data(), bs.get() + j*(tree_height-1), tree_height-1, io, j); */
           block secret_sum_f2;
           io->recv_data(&secret_sum_f2, sizeof(block));
 
@@ -127,6 +154,10 @@ void mpcot(
       }}});
   }
   for (auto& th : ths) { th.join(); }
+
+  if constexpr (role == Role::Sender) {
+  }
+
 
   if (is_malicious) {
     // consistency check

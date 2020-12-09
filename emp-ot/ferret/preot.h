@@ -47,30 +47,22 @@ public:
     }
   }
 
-  void send(const block * m0, const  block * m1, int length, NetIO * io2, int s) {
-    block pad[2];
+  void send(const block * m0, const block * m1, int length, NetIO * io, int s) {
+    std::vector<block> pad(2*length);
     int k = s*length;
     for (int i = 0; i < length; ++i) {
-      if (!bits[k]) {
-        pad[0] = m0[i] ^ pre_data[k];
-        pad[1] = m1[i] ^ pre_data[k+n];
-      } else {
-        pad[0] = m0[i] ^ pre_data[k+n];
-        pad[1] = m1[i] ^ pre_data[k];
-      }
-      ++k;
-      io2->send_block(pad, 2);
+      pad[2*i] = m0[i] ^ pre_data[k+i + bits[k+i]*n];
+      pad[2*i+1] = m1[i] ^ pre_data[k+i + (!bits[k+i])*n];
     }
+    io->send_block(pad.data(), 2*length);
   }
 
-  void recv(block* data, const bool* b, int length, NetIO* io2, int s) {
+  void recv(block* data, const bool* b, int length, NetIO* io, int s) {
     int k = s*length;
-    block pad[2];
+    std::vector<block> pad(2*length);
+    io->recv_block(pad.data(), 2*length);
     for (int i = 0; i < length; ++i) {
-      io2->recv_block(pad, 2);
-      int ind = b[i] ? 1 : 0;
-      data[i] = pre_data[k] ^ pad[ind];
-      ++k;
+      data[i] = pre_data[k+i] ^ pad[2*i + b[i]];
     }
   }
 };
