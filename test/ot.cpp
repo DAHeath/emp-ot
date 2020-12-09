@@ -8,33 +8,18 @@ int main(int argc, char** argv) {
   parse_party_and_port(argv, &party, &port);
 
   if (party == ALICE) {
-    NetIO* ios[threads+1];
-    for(int i = 0; i < threads+1; ++i)
-      ios[i] = new NetIO(nullptr, port+i);
-    auto ferretcot = FerretCOT<Role::Sender, threads>::make(ios, false);
-    cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length)*1e6<<" OTps"<<endl;
+    NetIO io { nullptr, port };
+    auto ferretcot = FerretCOT<Role::Sender, threads>::make(&io, false);
+    cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, &io, party, length)*1e6<<" OTps"<<endl;
 
-    ferretcot = FerretCOT<Role::Sender, threads>::make(ios, true);
-    cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length)*1e6<<" OTps"<<endl;
-
-
-    for(int i = 0; i < threads+1; ++i) {
-      delete ios[i];
-    }
+    ferretcot = FerretCOT<Role::Sender, threads>::make(&io, true);
+    cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, &io, party, length)*1e6<<" OTps"<<endl;
   } else {
-    NetIO* ios[threads+1];
-    for(int i = 0; i < threads+1; ++i)
-      ios[i] = new NetIO("127.0.0.1",port+i);
-    auto ferretcot = FerretCOT<Role::Receiver, threads>::make(ios, false);
-    cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length)*1e6<<" OTps"<<endl;
-    /* cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, false)*1e6<<" OTps"<<endl; */
-    ferretcot = FerretCOT<Role::Receiver, threads>::make(ios, true);
-    cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length)*1e6<<" OTps"<<endl;
-    /* cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, ios[0], party, length, false)*1e6<<" OTps"<<endl; */
-
-    for(int i = 0; i < threads+1; ++i) {
-      delete ios[i];
-    }
+    NetIO io { "127.0.0.1",port };
+    auto ferretcot = FerretCOT<Role::Receiver, threads>::make(&io, false);
+    cout <<"Passive FERRET OT\t"<<double(length)/test_rcot(&ferretcot, &io, party, length)*1e6<<" OTps"<<endl;
+    ferretcot = FerretCOT<Role::Receiver, threads>::make(&io, true);
+    cout <<"Active FERRET OT\t"<<double(length)/test_rcot(&ferretcot, &io, party, length)*1e6<<" OTps"<<endl;
   }
 }
 

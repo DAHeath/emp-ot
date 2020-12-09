@@ -21,7 +21,7 @@ class FerretCOT {
 public:
   block delta;
 
-  static FerretCOT make(NetIO* ios[threads+1], bool malicious = false);
+  static FerretCOT make(NetIO* io, bool malicious = false);
 
   void rcot(block *data, std::size_t num);
   std::size_t rcot_inplace(std::span<block>);
@@ -50,7 +50,6 @@ private:
 
   NetIO* io;
   bool malicious;
-  NetIO** ios;
 
   std::vector<block> ot_pre_data;
 

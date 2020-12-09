@@ -56,11 +56,10 @@ std::vector<block> base_cot(
 
 
 template <Role role, std::size_t threads>
-FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], bool malicious) {
+FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* io, bool malicious) {
   FerretCOT out;
-  out.io = ios[0];
+  out.io = io;
   out.malicious = malicious;
-  out.ios = ios;
 
   if constexpr (role == Role::Sender) {
     PRG prg;
@@ -88,7 +87,7 @@ void FerretCOT<role, threads>::extend(
     const MpDesc& desc,
     std::span<block> ot_output,
     std::span<block> ot_input) {
-  mpcot<role, threads>(malicious, desc, ios, delta, ot_output.data(), ot_input);
+  mpcot<role, threads>(malicious, desc, io, delta, ot_output.data(), ot_input);
   const block seed = seed_gen<role>(*io);
   lpn<role>(desc, seed, threads, ot_output, ot_input.subspan(CONSIST_CHECK_COT_NUM));
 }

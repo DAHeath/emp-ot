@@ -47,11 +47,10 @@ std::vector<std::uint32_t> range_subset(std::uint32_t cap, std::size_t n) {
 // MPFSS F_2k
 template<Role role, std::size_t threads>
 void mpcot(
-  bool is_malicious, const MpDesc& desc, NetIO* ios[threads+1],
+  bool is_malicious, const MpDesc& desc, NetIO* io,
     block delta,
     block * sparse_vector,
     std::span<block> pre_cot_data) {
-  auto netio = ios[0];
   auto tree_height = desc.bin_sz+1;
   int leave_n = 1<<(tree_height-1);
 
@@ -84,8 +83,8 @@ void mpcot(
 
   OTPre<role> ot(desc.bin_sz * desc.t);
   ot.pre(pre_cot_data, delta);
-  ot.choose(netio, bs.get(), (tree_height-1)*desc.t);
-  netio->flush();
+  ot.choose(io, bs.get(), (tree_height-1)*desc.t);
+  io->flush();
 
   int width = (desc.t+threads)/(threads+1);
   const auto length = tree_height-1;
@@ -94,9 +93,9 @@ void mpcot(
 
 
   if (role == Role::Receiver) {
+    io->recv_block(blocks.data(), blocks.size());
+    io->recv_block(secret_sums_f2.data(), secret_sums_f2.size());
   }
-
-
 
   // execute the single-point OTs in parallel
   std::vector<std::thread> ths;
@@ -104,7 +103,10 @@ void mpcot(
     int start = i * width;
     int end = std::min((std::size_t)(i+1)*width, desc.t);
     ths.emplace_back(std::thread { [&, start, end] {
-      for(int j = start; j < end; ++j) {
+      for (int j = start; j < end; ++j) {
+        std::span<block> pad = blocks;
+        pad = pad.subspan(j * 2*length, 2*length);
+
         if constexpr (role == Role::Sender) {
           auto [secret_sum_f2, m] = spcot_send(
               tree_height,
@@ -113,32 +115,16 @@ void mpcot(
               delta,
               consist_check_VW.data()+j);
           secret_sums_f2[j] = secret_sum_f2;
-          auto io = ios[start/width];
 
           auto m0 = m.data();
           auto m1 = &m[tree_height-1];
-          /* std::vector<block> pad(2*length); */
-
-          std::span<block> pad = blocks;
-          pad = pad.subspan(j * 2*length, 2*length);
 
           int k = j*length;
           for (int i = 0; i < length; ++i) {
             pad[2*i] = m0[i] ^ ot.pre_data[k+i + ot.bits[k+i]*ot.n];
             pad[2*i+1] = m1[i] ^ ot.pre_data[k+i + (!ot.bits[k+i])*ot.n];
           }
-          io->send_block(pad.data(), 2*length);
-          io->send_block(&secret_sums_f2[j], 1);
-          io->flush();
         } else {
-          auto io = ios[start/width];
-
-          std::span<block> pad = blocks;
-          pad = pad.subspan(j * 2*length, 2*length);
-
-          io->recv_block(pad.data(), 2*length);
-          io->recv_block(&secret_sums_f2[j], 1);
-
           std::vector<block> m(tree_height-1);
 
           auto length = tree_height-1;
@@ -165,6 +151,9 @@ void mpcot(
   for (auto& th : ths) { th.join(); }
 
   if constexpr (role == Role::Sender) {
+    io->send_block(blocks.data(), blocks.size());
+    io->send_block(secret_sums_f2.data(), secret_sums_f2.size());
+    io->flush();
   }
 
 
@@ -175,7 +164,7 @@ void mpcot(
       block r1, r2;
       vector_self_xor(&r1, consist_check_VW.data(), desc.t);
       bool x_prime[128];
-      netio->recv_data(x_prime, 128*sizeof(bool));
+      io->recv_data(x_prime, 128*sizeof(bool));
       for(int i = 0; i < 128; ++i) {
         if(x_prime[i])
           pre_cot_data[i] = pre_cot_data[i] ^ delta;
@@ -185,8 +174,8 @@ void mpcot(
       block dig[2];
       Hash hash;
       hash.hash_once(dig, &r1, sizeof(block));
-      netio->send_data(dig, 2*sizeof(block));
-      netio->flush();
+      io->send_data(dig, 2*sizeof(block));
+      io->flush();
     } else {
       block r1, r2, r3;
       vector_self_xor(&r1, consist_check_VW.data(), desc.t);
@@ -201,15 +190,15 @@ void mpcot(
           pos[i] >>= 1;
         }
       }
-      netio->send_data(pre_cot_bool, 128*sizeof(bool));
-      netio->flush();
+      io->send_data(pre_cot_bool, 128*sizeof(bool));
+      io->flush();
       pack.packing(&r3, pre_cot_data.data());
       r1 = r1 ^ r3;
       block dig[2];
       Hash hash;
       hash.hash_once(dig, &r1, sizeof(block));
       block recv[2];
-      netio->recv_data(recv, 2*sizeof(block));
+      io->recv_data(recv, 2*sizeof(block));
       if (!cmpBlock(dig, recv, 2)) {
         std::cout << "SPCOT consistency check fails" << std::endl;
       }
