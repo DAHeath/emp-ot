@@ -35,22 +35,19 @@ private:
     .k = 589824,
     .t = 1295,
     .bin_sz = 13,
+    .m = 589824 + 13*1295 + CONSIST_CHECK_COT_NUM,
+    .mask = 0xFFFFF,
+    .limit = 10608640 - (589824 + 13*1295 + CONSIST_CHECK_COT_NUM),
   };
   static constexpr MpDesc PRE = {
     .n = 649728,
     .k = 36288,
     .t = 1269,
     .bin_sz = 9,
+    .m = 36288 + 9*1269 + CONSIST_CHECK_COT_NUM,
+    .mask = 0xFFFF,
+    .limit = 649728 - (36288 + 9*1269 + CONSIST_CHECK_COT_NUM),
   };
-  static constexpr std::size_t N_REG = 10608640;
-  static constexpr std::size_t T_REG = 1295;
-  static constexpr std::size_t K_REG = 589824;
-  static constexpr std::size_t BIN_SZ_REG = 13;
-  static constexpr std::size_t N_PRE_REG = 649728;
-  static constexpr std::size_t T_PRE_REG = 1269;
-  static constexpr std::size_t K_PRE_REG = 36288;
-  static constexpr std::size_t BIN_SZ_PRE_REG = 9;
-  static constexpr std::size_t CONSIST_CHECK_COT_NUM = 128;
 
   std::size_t ot_limit;
 

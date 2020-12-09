@@ -10,11 +10,16 @@
 
 namespace emp {
 
+static constexpr std::size_t CONSIST_CHECK_COT_NUM = 128;
+
 struct MpDesc {
   std::size_t n;
   std::size_t k;
   std::size_t t;
   std::size_t bin_sz;
+  std::size_t m;
+  std::size_t mask;
+  std::size_t limit;
 };
 
 
@@ -45,16 +50,14 @@ void mpcot(
   bool is_malicious, const MpDesc& desc, NetIO* ios[threads+1],
     block delta, block * sparse_vector, OTPre<role>* ot, block *pre_cot_data) {
   auto netio = ios[0];
-  auto item_n = desc.t;
   auto tree_height = desc.bin_sz+1;
   int leave_n = 1<<(tree_height-1);
-  int tree_n = item_n;
 
   std::vector<block> consist_check_chi_alpha;;
   if constexpr(role == Role::Receiver) {
-    consist_check_chi_alpha = std::vector<block>(item_n);
+    consist_check_chi_alpha = std::vector<block>(desc.t);
   }
-  std::vector<block> consist_check_VW(item_n);
+  std::vector<block> consist_check_VW(desc.t);
 
 
   std::unique_ptr<bool[]> bs(new bool[(tree_height-1)*desc.t]);
@@ -62,7 +65,7 @@ void mpcot(
   { // make single point ot choices
     ot->reset();
     if constexpr (role == Role::Receiver) {
-      positions = range_subset(desc.n, item_n);
+      positions = range_subset(desc.n, desc.t);
 
       bs = std::unique_ptr<bool[]>(new bool[(tree_height-1)*desc.t]);
 
@@ -81,27 +84,37 @@ void mpcot(
     netio->flush();
   }
 
-
-
-
   // execute the single-point OTs in parallel
   std::vector<std::thread> ths;
-  int width = (tree_n+threads)/(threads+1);	
+  int width = (desc.t+threads)/(threads+1);	
   for(int i = 0; i < threads+1; ++i) {
     int start = i * width;
-    int end = std::min((i+1)*width, tree_n);
+    int end = std::min((std::size_t)(i+1)*width, desc.t);
     ths.emplace_back(std::thread {
         [&, start, end] {
       for(int j = start; j < end; ++j) {
         if constexpr (role == Role::Sender) {
-        spcot_send(tree_height, is_malicious, ot, ios[start/width], j, sparse_vector+j*leave_n, delta, consist_check_VW.data()+j);
+          spcot_send(
+              tree_height,
+              is_malicious,
+              ot,
+              ios[start/width],
+              j,
+              sparse_vector+j*leave_n,
+              delta,
+              consist_check_VW.data()+j);
         } else {
           spcot_recv(
               tree_height,
               positions[j]%leave_n,
               bs.get() + j*(tree_height-1),
-              /* bs[j].get(), */
-              is_malicious, ot, ios[start/width], j, sparse_vector+j*leave_n, consist_check_chi_alpha.data()+j, consist_check_VW.data()+j);
+              is_malicious,
+              ot,
+              ios[start/width],
+              j,
+              sparse_vector+j*leave_n,
+              consist_check_chi_alpha.data()+j,
+              consist_check_VW.data()+j);
         }
       }}});
   }
@@ -112,7 +125,7 @@ void mpcot(
     GaloisFieldPacking pack;
     if constexpr (role == Role::Sender) {
       block r1, r2;
-      vector_self_xor(&r1, consist_check_VW.data(), tree_n);
+      vector_self_xor(&r1, consist_check_VW.data(), desc.t);
       bool x_prime[128];
       netio->recv_data(x_prime, 128*sizeof(bool));
       for(int i = 0; i < 128; ++i) {
@@ -128,8 +141,8 @@ void mpcot(
       netio->flush();
     } else {
       block r1, r2, r3;
-      vector_self_xor(&r1, consist_check_VW.data(), tree_n);
-      vector_self_xor(&r2, consist_check_chi_alpha.data(), tree_n);
+      vector_self_xor(&r1, consist_check_VW.data(), desc.t);
+      vector_self_xor(&r2, consist_check_chi_alpha.data(), desc.t);
       uint64_t pos[2];
       pos[0] = _mm_extract_epi64(r2, 0);
       pos[1] = _mm_extract_epi64(r2, 1);

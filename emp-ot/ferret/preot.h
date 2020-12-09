@@ -21,11 +21,10 @@ public:
 
   OTPre() { }
 
-  OTPre(NetIO* io, int length, int times)
+  OTPre(NetIO* io, int n)
     : io(io),
-      length(length),
       count(0),
-      n(length*times),
+      n(n),
       pre_data(2*n),
       bits(new bool[n]) { }
 

@@ -51,25 +51,36 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* ios[threads+1], b
     out.delta = out.delta | 0x1;
   }
 
-  out.pre_ot = OTPre<role>(out.io, BIN_SZ_REG, T_REG);
-  out.M = K_REG + out.pre_ot.n + CONSIST_CHECK_COT_NUM;
-  out.ot_limit = N_REG - out.M;
-  out.ot_pre_data.resize(N_PRE_REG);
+  out.pre_ot = OTPre<role>(out.io, REGULAR.bin_sz * REGULAR.t);
+  out.ot_pre_data.resize(PRE.n);
 
-  OTPre<role> pre_ot_ini(ios[0], BIN_SZ_PRE_REG, T_PRE_REG);
-
-  std::size_t num = pre_ot_ini.n + K_PRE_REG + CONSIST_CHECK_COT_NUM;
+  OTPre<role> pre_ot_ini(ios[0], PRE.bin_sz * PRE.t);
 
   std::unique_ptr<bool[]> choices;
   if constexpr (role == Role::Receiver) {
-    choices = bools_r(num);
+    choices = bools_r(PRE.m);
   }
 
-  auto init = base_cot<role>(malicious, out.io, out.delta, choices.get(), num);
+  auto init = base_cot<role>(malicious, out.io, out.delta, choices.get(), PRE.m);
   pre_ot_ini.pre(init, out.delta);
   out.extend(pre_ot_ini, PRE, out.ot_pre_data, init);
 
   return out;
+}
+
+
+template <Role role>
+block seed_gen(NetIO& io) {
+  block seed;
+  if constexpr (role == Role::Sender) {
+    PRG prg;
+    prg.random_block(&seed, 1);
+    io.send_data(&seed, sizeof(block));
+  } else {
+    io.recv_data(&seed, sizeof(block));
+  }
+  io.flush();
+  return seed;
 }
 
 
@@ -81,13 +92,14 @@ void FerretCOT<role, threads>::extend(
     std::span<block> ot_output,
     std::span<block> ot_input) {
   mpcot<role, threads>(malicious, desc, ios, delta, ot_output.data(), &preot, ot_input.data());
-  lpn<role>(desc.n, desc.k, io, threads, ot_output.data(), ot_input.data() + CONSIST_CHECK_COT_NUM);
+  const block seed = seed_gen<role>(*io);
+  lpn<role>(desc, seed, threads, ot_output.data(), ot_input.data() + CONSIST_CHECK_COT_NUM);
 }
 
 template <Role role, std::size_t threads>
 std::size_t FerretCOT<role, threads>::byte_memory_need_inplace(std::size_t ot_need) {
-  std::size_t round = (ot_need - 1) / ot_limit;
-  return round * ot_limit + N_REG;
+  std::size_t round = (ot_need - 1) / REGULAR.limit;
+  return round * REGULAR.limit + REGULAR.n;
 }
 
 // extend f2k (benchmark)
@@ -95,16 +107,16 @@ std::size_t FerretCOT<role, threads>::byte_memory_need_inplace(std::size_t ot_ne
 // output the number of COTs that can be used
 template <Role role, std::size_t threads>
 std::size_t FerretCOT<role, threads>::rcot_inplace(std::span<block> buf) {
-  if (buf.size() < N_REG || (buf.size() - M) % ot_limit != 0) {
+  if (buf.size() < REGULAR.n || (buf.size() - REGULAR.m) % REGULAR.limit != 0) {
     error("Insufficient space. Use `byte_memory_need_inplace` to compute needed space.");
   }
-  std::size_t ot_output_n = buf.size() - M;
-  std::size_t round = ot_output_n / ot_limit;
+  std::size_t ot_output_n = buf.size() - REGULAR.m;
+  std::size_t round = ot_output_n / REGULAR.limit;
   for (std::size_t i = 0; i < round; ++i) {
     pre_ot.pre(ot_pre_data, delta);
     extend(pre_ot, REGULAR, buf, ot_pre_data);
-    buf = buf.subspan(ot_limit);
-    std::copy(buf.begin(), buf.begin() + M, ot_pre_data.begin());
+    buf = buf.subspan(REGULAR.limit);
+    std::copy(buf.begin(), buf.begin() + REGULAR.m, ot_pre_data.begin());
   }
   return ot_output_n;
 }
