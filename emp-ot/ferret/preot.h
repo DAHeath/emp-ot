@@ -18,52 +18,28 @@ public:
 
   OTPre() { }
 
-  OTPre(int n)
-    : n(n),
-      pre_data(2*n),
-      bits(new bool[n]) { }
+  OTPre(int n) { }
 
-  void pre(std::span<block> data, block delta) {
+  std::pair<std::vector<block>, std::unique_ptr<bool[]>>
+  pre(NetIO* io, const bool* b, std::size_t n, std::span<block> data, block delta) {
+    std::vector<block> pre_data(2*n);
+    std::unique_ptr<bool[]> bits(new bool[n]);
     if constexpr (role == Role::Sender) {
       ccrh.Hn(pre_data.data(), data.data(), 0, n, pre_data.data()+n);
       xorBlocks_arr(pre_data.data()+n, data.data(), delta, n);
       ccrh.Hn(pre_data.data()+n, pre_data.data()+n, 0, n);
+      io->recv_data(bits.get(), n);
     } else {
       for(int i = 0; i < n; ++i) {
         bits[i] = getLSB(data[i]);
       }
       ccrh.Hn(pre_data.data(), data.data(), 0, n);
-    }
-  }
-
-  void choose(NetIO* io, const bool* b, std::size_t n) {
-    if constexpr (role == Role::Sender) {
-      io->recv_data(bits.get(), n);
-    } else {
       for (int i = 0; i < n; ++i) {
         bits[i] = (b[i] != bits[i]);
       }
       io->send_data(bits.get(), n);
     }
-  }
-
-  void send(const block * m0, const block * m1, int length, NetIO * io, int s) {
-    std::vector<block> pad(2*length);
-    int k = s*length;
-    for (int i = 0; i < length; ++i) {
-      pad[2*i] = m0[i] ^ pre_data[k+i + bits[k+i]*n];
-      pad[2*i+1] = m1[i] ^ pre_data[k+i + (!bits[k+i])*n];
-    }
-    io->send_block(pad.data(), 2*length);
-  }
-
-  void recv(block* data, const bool* b, int length, NetIO* io, int s) {
-    int k = s*length;
-    std::vector<block> pad(2*length);
-    io->recv_block(pad.data(), 2*length);
-    for (int i = 0; i < length; ++i) {
-      data[i] = pre_data[k+i] ^ pad[2*i + b[i]];
-    }
+    return { std::move(pre_data), std::move(bits) };
   }
 };
 

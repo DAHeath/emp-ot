@@ -81,14 +81,33 @@ void mpcot(
     }
   }
 
-  OTPre<role> ot(desc.bin_sz * desc.t);
-  ot.pre(pre_cot_data, delta);
-  ot.choose(io, bs.get(), (tree_height-1)*desc.t);
+  auto n = desc.bin_sz * desc.t;
+
+  std::vector<block> pre_data(2*n);
+  std::unique_ptr<bool[]> bits(new bool[n]);
+  { // pre OT
+    CCRH ccrh;
+    if constexpr (role == Role::Sender) {
+      ccrh.Hn(pre_data.data(), pre_cot_data.data(), 0, n, pre_data.data()+n);
+      xorBlocks_arr(pre_data.data()+n, pre_cot_data.data(), delta, n);
+      ccrh.Hn(pre_data.data()+n, pre_data.data()+n, 0, n);
+      io->recv_data(bits.get(), n);
+    } else {
+      ccrh.Hn(pre_data.data(), pre_cot_data.data(), 0, n);
+      for (int i = 0; i < n; ++i) {
+        bits[i] = (bs[i] != getLSB(pre_cot_data[i]));
+      }
+      io->send_data(bits.get(), n);
+    }
+  }
+
+
+
+  /* ot.choose(); */
   io->flush();
 
   int width = (desc.t+threads)/(threads+1);
-  const auto length = tree_height-1;
-  std::vector<block> blocks(2 * desc.t * length);
+  std::vector<block> blocks(2 * desc.t * desc.bin_sz);
   std::vector<block> secret_sums_f2(desc.t);
 
 
@@ -105,7 +124,7 @@ void mpcot(
     ths.emplace_back(std::thread { [&, start, end] {
       for (int j = start; j < end; ++j) {
         std::span<block> pad = blocks;
-        pad = pad.subspan(j * 2*length, 2*length);
+        pad = pad.subspan(j * 2*desc.bin_sz, 2*desc.bin_sz);
 
         if constexpr (role == Role::Sender) {
           auto [secret_sum_f2, m] = spcot_send(
@@ -119,20 +138,19 @@ void mpcot(
           auto m0 = m.data();
           auto m1 = &m[tree_height-1];
 
-          int k = j*length;
-          for (int i = 0; i < length; ++i) {
-            pad[2*i] = m0[i] ^ ot.pre_data[k+i + ot.bits[k+i]*ot.n];
-            pad[2*i+1] = m1[i] ^ ot.pre_data[k+i + (!ot.bits[k+i])*ot.n];
+          int k = j*desc.bin_sz;
+          for (int i = 0; i < desc.bin_sz; ++i) {
+            pad[2*i] = m0[i] ^ pre_data[k+i + bits[k+i]*n];
+            pad[2*i+1] = m1[i] ^ pre_data[k+i + (!bits[k+i])*n];
           }
         } else {
           std::vector<block> m(tree_height-1);
 
-          auto length = tree_height-1;
           auto b = bs.get() + j*(tree_height-1);
-          int k = j*length;
+          int k = j*desc.bin_sz;
 
-          for (int i = 0; i < length; ++i) {
-            m[i] = ot.pre_data[k+i] ^ pad[2*i + b[i]];
+          for (int i = 0; i < desc.bin_sz; ++i) {
+            m[i] = pre_data[k+i] ^ pad[2*i + b[i]];
           }
 
           spcot_recv(

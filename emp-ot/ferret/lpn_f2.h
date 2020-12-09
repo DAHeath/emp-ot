@@ -7,16 +7,6 @@
 using namespace emp;
 
 
-constexpr int mkMask(int k) {
-  int out = 1;
-  while (out < k) {
-    out <<= 1;
-    out = out | 0x1;
-  }
-  return out;
-}
-
-
 // Implementation of local linear code on F_2^k
 // Performance highly dependent on the CPU cache size
 template<Role role, int d = 10>
