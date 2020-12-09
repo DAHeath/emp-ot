@@ -87,6 +87,12 @@ void mpcot(
   ot.choose(netio, bs.get(), (tree_height-1)*desc.t);
   netio->flush();
 
+  int width = (desc.t+threads)/(threads+1);
+  const auto length = tree_height-1;
+  std::vector<block> blocks(2 * desc.t * length);
+  std::vector<block> secret_sums_f2(desc.t);
+
+
   if (role == Role::Receiver) {
   }
 
@@ -94,7 +100,6 @@ void mpcot(
 
   // execute the single-point OTs in parallel
   std::vector<std::thread> ths;
-  int width = (desc.t+threads)/(threads+1);
   for(int i = 0; i < threads+1; ++i) {
     int start = i * width;
     int end = std::min((std::size_t)(i+1)*width, desc.t);
@@ -107,42 +112,46 @@ void mpcot(
               sparse_vector+j*leave_n,
               delta,
               consist_check_VW.data()+j);
+          secret_sums_f2[j] = secret_sum_f2;
           auto io = ios[start/width];
 
           auto m0 = m.data();
           auto m1 = &m[tree_height-1];
-          auto length = tree_height-1;
-          std::vector<block> pad(2*length);
+          /* std::vector<block> pad(2*length); */
+
+          std::span<block> pad = blocks;
+          pad = pad.subspan(j * 2*length, 2*length);
+
           int k = j*length;
           for (int i = 0; i < length; ++i) {
             pad[2*i] = m0[i] ^ ot.pre_data[k+i + ot.bits[k+i]*ot.n];
             pad[2*i+1] = m1[i] ^ ot.pre_data[k+i + (!ot.bits[k+i])*ot.n];
           }
           io->send_block(pad.data(), 2*length);
-          io->send_data(&secret_sum_f2, sizeof(block));
+          io->send_block(&secret_sums_f2[j], 1);
           io->flush();
         } else {
           auto io = ios[start/width];
+
+          std::span<block> pad = blocks;
+          pad = pad.subspan(j * 2*length, 2*length);
+
+          io->recv_block(pad.data(), 2*length);
+          io->recv_block(&secret_sums_f2[j], 1);
+
           std::vector<block> m(tree_height-1);
 
-          {
-            auto length = tree_height-1;
-            auto b = bs.get() + j*(tree_height-1);
-            int k = j*length;
-            std::vector<block> pad(2*length);
-            io->recv_block(pad.data(), 2*length);
-            for (int i = 0; i < length; ++i) {
-              m[i] = ot.pre_data[k+i] ^ pad[2*i + b[i]];
-            }
-          }
+          auto length = tree_height-1;
+          auto b = bs.get() + j*(tree_height-1);
+          int k = j*length;
 
-          /* ot.recv(m.data(), bs.get() + j*(tree_height-1), tree_height-1, io, j); */
-          block secret_sum_f2;
-          io->recv_data(&secret_sum_f2, sizeof(block));
+          for (int i = 0; i < length; ++i) {
+            m[i] = ot.pre_data[k+i] ^ pad[2*i + b[i]];
+          }
 
           spcot_recv(
               m,
-              secret_sum_f2,
+              secret_sums_f2[j],
               tree_height,
               positions[j]%leave_n,
               bs.get() + j*(tree_height-1),
