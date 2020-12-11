@@ -27,6 +27,7 @@ void lpn(
       uint32_t* r = reinterpret_cast<uint32_t*>(tmp);
       for (int m = 0; m < 4; ++m) {
         for (int ix = 0; ix < d; ++ix) {
+          /* int index = r[m*d + ix] % desc.k; */
           int index = (*r) & desc.mask;
           ++r;
           index = index >= desc.k ? index-desc.k : index;

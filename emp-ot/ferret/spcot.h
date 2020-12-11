@@ -20,30 +20,28 @@ void spcot_recv(
     block* ggm_tree,
     block *chi_alpha,
     block *W) {
-  int leave_n = 1<<(depth-1);
 
+  int leave_n = 1<<(depth-1);
   { // gmm tree reconstruction
     int to_fill_idx = 0;
     TwoKeyPRP prp(zero_block, makeBlock(0, 1));
     for (int i = 0; i < depth-1; ++i) {
+      // reconstruct a layer of the ggm tree
       to_fill_idx = to_fill_idx * 2;
       ggm_tree[to_fill_idx] = ggm_tree[to_fill_idx+1] = zero_block;
+      int item_n = 1<< (i+1);
 
-      { // reconstruct a layer of the ggm tree
-        int item_n = 1<< (i+1);
-        block nodes_sum = zero_block;
-
-        for (int j = b[i] != 0; j < item_n; j+=2) {
-          nodes_sum = nodes_sum ^ ggm_tree[j];
-        }
-        ggm_tree[to_fill_idx + b[i]] = nodes_sum ^ m[i];
-        if(i+1 != depth-1) {
-          for (int j = item_n-2; j >= 0; j-=2) {
-            prp.node_expand_2to4(&ggm_tree[j*2], &ggm_tree[j]);
-          }
-        }
+      block nodes_sum = zero_block;
+      for (int j = b[i] != 0; j < item_n; j+=2) {
+        nodes_sum = nodes_sum ^ ggm_tree[j];
       }
 
+      ggm_tree[to_fill_idx + b[i]] = nodes_sum ^ m[i];
+      if (i+1 != depth-1) {
+        for (int j = item_n-2; j >= 0; j-=2) {
+          prp.node_expand_2to4(&ggm_tree[j*2], &ggm_tree[j]);
+        }
+      }
       to_fill_idx += !b[i];
     }
   }

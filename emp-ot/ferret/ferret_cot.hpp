@@ -67,14 +67,14 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* io, bool maliciou
     out.delta = out.delta | 0x1;
   }
 
-  out.ot_pre_data.resize(PRE.n);
-
   std::unique_ptr<bool[]> choices;
   if constexpr (role == Role::Receiver) {
     choices = bools_r(PRE.m);
   }
 
   auto init = base_cot<role>(malicious, out.io, out.delta, choices.get(), PRE.m);
+
+  out.ot_pre_data.resize(PRE.n);
   out.extend(PRE, out.ot_pre_data, init);
 
   return out;
@@ -85,11 +85,11 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* io, bool maliciou
 template <Role role, std::size_t threads>
 void FerretCOT<role, threads>::extend(
     const MpDesc& desc,
-    std::span<block> ot_output,
-    std::span<block> ot_input) {
-  mpcot<role, threads>(malicious, desc, io, delta, ot_output.data(), ot_input);
+    std::span<block> tar,
+    std::span<block> src) {
+  lpn_error<role, threads>(malicious, desc, io, delta, tar.data(), src);
   const block seed = seed_gen<role>(*io);
-  lpn<role>(desc, seed, threads, ot_output, ot_input.subspan(CONSIST_CHECK_COT_NUM));
+  lpn<role>(desc, seed, threads, tar, src.subspan(CONSIST_CHECK_COT_NUM));
 }
 
 

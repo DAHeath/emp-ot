@@ -1,11 +1,10 @@
-#ifndef MPCOT_REG_H__
+lpn_errorifndef MPCOT_REG_H__
 #define MPCOT_REG_H__
 
 #include <emp-tool/emp-tool.h>
 #include <set>
 #include <unordered_set>
 #include "emp-ot/ferret/spcot.h"
-#include "emp-ot/ferret/preot.h"
 #include "emp-ot/ferret/role.h"
 
 namespace emp {
@@ -54,12 +53,6 @@ void mpcot(
   auto tree_height = desc.bin_sz+1;
   int leave_n = 1<<(tree_height-1);
 
-  std::vector<block> consist_check_chi_alpha;;
-  if constexpr(role == Role::Receiver) {
-    consist_check_chi_alpha = std::vector<block>(desc.t);
-  }
-  std::vector<block> consist_check_VW(desc.t);
-
 
   std::unique_ptr<bool[]> bs(new bool[(tree_height-1)*desc.t]);
   std::vector<std::uint32_t> positions;
@@ -100,10 +93,6 @@ void mpcot(
       io->send_data(bits.get(), n);
     }
   }
-
-
-
-  /* ot.choose(); */
   io->flush();
 
   int width = (desc.t+threads)/(threads+1);
@@ -115,6 +104,12 @@ void mpcot(
     io->recv_block(blocks.data(), blocks.size());
     io->recv_block(secret_sums_f2.data(), secret_sums_f2.size());
   }
+
+  std::vector<block> consist_check_chi_alpha;
+  if constexpr (role == Role::Receiver) {
+    consist_check_chi_alpha = std::vector<block>(desc.t);
+  }
+  std::vector<block> consist_check_VW(desc.t);
 
   // execute the single-point OTs in parallel
   std::vector<std::thread> ths;
@@ -173,7 +168,6 @@ void mpcot(
     io->send_block(secret_sums_f2.data(), secret_sums_f2.size());
     io->flush();
   }
-
 
   if (is_malicious) {
     // consistency check

@@ -1,7 +1,7 @@
 #ifndef EMP_FERRET_COT_H_
 #define EMP_FERRET_COT_H_
 
-#include "emp-ot/ferret/mpcot_reg.h"
+#include "emp-ot/ferret/lpn_error.h"
 #include "emp-ot/ferret/lpn_f2.h"
 
 #include "emp-ot/ferret/role.h"
@@ -9,6 +9,29 @@
 #include <span>
 
 namespace emp {
+
+
+static constexpr MpDesc REGULAR = {
+  .n = 10608640,
+  .k = 589824,
+  .t = 1295,
+  .bin_sz = 13,
+  .m = 589824 + 13*1295 + CONSIST_CHECK_COT_NUM,
+  .mask = 0xFFFFF,
+  .limit = 10608640 - (589824 + 13*1295 + CONSIST_CHECK_COT_NUM),
+};
+
+
+static constexpr MpDesc PRE = {
+  .n = 649728,
+  .k = 36288,
+  .t = 1269,
+  .bin_sz = 9,
+  .m = 36288 + 9*1269 + CONSIST_CHECK_COT_NUM,
+  .mask = 0xFFFF,
+  .limit = 649728 - (36288 + 9*1269 + CONSIST_CHECK_COT_NUM),
+};
+
 
 /*
  * Ferret COT binary version
@@ -23,31 +46,11 @@ public:
 
   static FerretCOT make(NetIO* io, bool malicious = false);
 
-  void rcot(block *data, std::size_t num);
   std::size_t rcot_inplace(std::span<block>);
 
   std::size_t byte_memory_need_inplace(std::size_t ot_need);
 
 private:
-  static constexpr MpDesc REGULAR = {
-    .n = 10608640,
-    .k = 589824,
-    .t = 1295,
-    .bin_sz = 13,
-    .m = 589824 + 13*1295 + CONSIST_CHECK_COT_NUM,
-    .mask = 0xFFFFF,
-    .limit = 10608640 - (589824 + 13*1295 + CONSIST_CHECK_COT_NUM),
-  };
-  static constexpr MpDesc PRE = {
-    .n = 649728,
-    .k = 36288,
-    .t = 1269,
-    .bin_sz = 9,
-    .m = 36288 + 9*1269 + CONSIST_CHECK_COT_NUM,
-    .mask = 0xFFFF,
-    .limit = 649728 - (36288 + 9*1269 + CONSIST_CHECK_COT_NUM),
-  };
-
   NetIO* io;
   bool malicious;
 
