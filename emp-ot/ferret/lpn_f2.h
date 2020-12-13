@@ -10,7 +10,7 @@ using namespace emp;
 // Implementation of local linear code on F_2^k
 // Performance highly dependent on the CPU cache size
 template<Role role, int d = 10>
-void lpn(
+void sparse_linear_code(
     const MpDesc& desc, const block& seed, int threads,
     std::span<block> nn,
     std::span<const block> kk) {

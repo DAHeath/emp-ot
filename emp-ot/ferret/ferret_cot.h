@@ -39,12 +39,12 @@ static constexpr MpDesc PRE = {
  * https://eprint.iacr.org/2020/924.pdf
  *
  */
-template<Role role, std::size_t threads>
+template<Model model, Role role, std::size_t threads>
 class FerretCOT {
 public:
   block delta;
 
-  static FerretCOT make(NetIO* io, bool malicious = false);
+  static FerretCOT make(NetIO* io);
 
   std::size_t rcot_inplace(std::span<block>);
 
@@ -52,7 +52,6 @@ public:
 
 private:
   NetIO* io;
-  bool malicious;
 
   std::vector<block> ot_pre_data;
 

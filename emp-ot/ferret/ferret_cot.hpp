@@ -1,35 +1,12 @@
-std::unique_ptr<bool[]> bools_r(std::size_t n) {
-  PRG prg;
-  std::unique_ptr<bool[]> out(new bool[n]);
-  prg.random_bool(out.get(), n);
-  return out;
-}
-
-
-template <Role role>
-block seed_gen(NetIO& io) {
-  block seed;
-  if constexpr (role == Role::Sender) {
-    PRG prg;
-    prg.random_block(&seed, 1);
-    io.send_data(&seed, sizeof(block));
-  } else {
-    io.recv_data(&seed, sizeof(block));
-  }
-  io.flush();
-  return seed;
-}
-
-
-template <Role role>
+template <Model model, Role role>
 std::vector<block> base_cot(
-    bool malicious,
     NetIO* io,
     block delta,
     bool* choices,
     std::size_t n) {
   const auto minusone = makeBlock(0xFFFFFFFFFFFFFFFFLL,0xFFFFFFFFFFFFFFFELL);
 
+  bool malicious = model == Model::Malicious;
   IKNP<NetIO> iknp { io, malicious };
 
   std::vector<block> buffer(n);
@@ -55,11 +32,10 @@ std::vector<block> base_cot(
 }
 
 
-template <Role role, std::size_t threads>
-FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* io, bool malicious) {
+template <Model model, Role role, std::size_t threads>
+FerretCOT<model, role, threads> FerretCOT<model, role, threads>::make(NetIO* io) {
   FerretCOT out;
   out.io = io;
-  out.malicious = malicious;
 
   if constexpr (role == Role::Sender) {
     PRG prg;
@@ -69,10 +45,12 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* io, bool maliciou
 
   std::unique_ptr<bool[]> choices;
   if constexpr (role == Role::Receiver) {
-    choices = bools_r(PRE.m);
+    PRG prg;
+    choices = std::unique_ptr<bool[]>(new bool[PRE.m]);
+    prg.random_bool(choices.get(), PRE.m);
   }
 
-  auto init = base_cot<role>(malicious, out.io, out.delta, choices.get(), PRE.m);
+  auto init = base_cot<model, role>(out.io, out.delta, choices.get(), PRE.m);
 
   out.ot_pre_data.resize(PRE.n);
   out.extend(PRE, out.ot_pre_data, init);
@@ -82,19 +60,29 @@ FerretCOT<role, threads> FerretCOT<role, threads>::make(NetIO* io, bool maliciou
 
 
 // extend f2k in detail
-template <Role role, std::size_t threads>
-void FerretCOT<role, threads>::extend(
+template <Model model, Role role, std::size_t threads>
+void FerretCOT<model, role, threads>::extend(
     const MpDesc& desc,
     std::span<block> tar,
     std::span<block> src) {
-  lpn_error<role, threads>(malicious, desc, io, delta, tar.data(), src);
-  const block seed = seed_gen<role>(*io);
-  lpn<role>(desc, seed, threads, tar, src.subspan(CONSIST_CHECK_COT_NUM));
+  block seed;
+  { // gen seed
+    if constexpr (role == Role::Sender) {
+      PRG prg;
+      prg.random_block(&seed, 1);
+      io->send_data(&seed, sizeof(block));
+    } else {
+      io->recv_data(&seed, sizeof(block));
+    }
+    io->flush();
+  }
+  lpn_error<model, role, threads>(desc, io, delta, tar.data(), src);
+  sparse_linear_code<role>(desc, seed, threads, tar, src.subspan(CONSIST_CHECK_COT_NUM));
 }
 
 
-template <Role role, std::size_t threads>
-std::size_t FerretCOT<role, threads>::byte_memory_need_inplace(std::size_t ot_need) {
+template <Model model, Role role, std::size_t threads>
+std::size_t FerretCOT<model, role, threads>::byte_memory_need_inplace(std::size_t ot_need) {
   std::size_t round = (ot_need - 1) / REGULAR.limit;
   return round * REGULAR.limit + REGULAR.n;
 }
@@ -103,8 +91,8 @@ std::size_t FerretCOT<role, threads>::byte_memory_need_inplace(std::size_t ot_ne
 // extend f2k (benchmark)
 // parameter "length" should be the return of "byte_memory_need_inplace"
 // output the number of COTs that can be used
-template <Role role, std::size_t threads>
-std::size_t FerretCOT<role, threads>::rcot_inplace(std::span<block> buf) {
+template <Model model, Role role, std::size_t threads>
+std::size_t FerretCOT<model, role, threads>::rcot_inplace(std::span<block> buf) {
   if (buf.size() < REGULAR.n || (buf.size() - REGULAR.m) % REGULAR.limit != 0) {
     error("Insufficient space. Use `byte_memory_need_inplace` to compute needed space.");
   }

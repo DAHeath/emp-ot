@@ -4,7 +4,7 @@
 #include <emp-tool/emp-tool.h>
 #include <set>
 #include <unordered_set>
-#include "emp-ot/ferret/spcot.h"
+#include "emp-ot/ferret/lpn_error_point.h"
 #include "emp-ot/ferret/role.h"
 
 namespace emp {
@@ -44,15 +44,14 @@ std::vector<std::uint32_t> range_subset(std::uint32_t cap, std::size_t n) {
 
 
 // MPFSS F_2k
-template<Role role, std::size_t threads>
+template<Model model, Role role, std::size_t threads>
 void lpn_error(
-  bool is_malicious, const MpDesc& desc, NetIO* io,
+  const MpDesc& desc, NetIO* io,
     block delta,
     block * sparse_vector,
     std::span<block> pre_cot_data) {
   auto tree_height = desc.bin_sz+1;
   int leave_n = 1<<(tree_height-1);
-
 
   std::unique_ptr<bool[]> bs(new bool[(tree_height-1)*desc.t]);
   std::vector<std::uint32_t> positions;
@@ -122,9 +121,8 @@ void lpn_error(
         pad = pad.subspan(j * 2*desc.bin_sz, 2*desc.bin_sz);
 
         if constexpr (role == Role::Sender) {
-          auto [secret_sum_f2, m] = spcot_send(
+          auto [secret_sum_f2, m] = error_point_send<model>(
               tree_height,
-              is_malicious,
               sparse_vector+j*leave_n,
               delta,
               consist_check_VW.data()+j);
@@ -148,13 +146,12 @@ void lpn_error(
             m[i] = pre_data[k+i] ^ pad[2*i + b[i]];
           }
 
-          spcot_recv(
+          error_point_recv<model>(
               m,
               secret_sums_f2[j],
               tree_height,
               positions[j]%leave_n,
               bs.get() + j*(tree_height-1),
-              is_malicious,
               sparse_vector+j*leave_n,
               consist_check_chi_alpha.data()+j,
               consist_check_VW.data()+j);
@@ -169,7 +166,7 @@ void lpn_error(
     io->flush();
   }
 
-  if (is_malicious) {
+  if (model == Model::Malicious) {
     // consistency check
     GaloisFieldPacking pack;
     if constexpr (role == Role::Sender) {

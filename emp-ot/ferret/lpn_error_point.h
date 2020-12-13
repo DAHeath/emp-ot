@@ -1,8 +1,10 @@
-#ifndef SPCOT_RECVER_H__
-#define SPCOT_RECVER_H__
-#include <iostream>
+#ifndef LPN_ERROR_POINT_H__
+#define LPN_ERROR_POINT_H__
+
+
 #include "emp-tool/emp-tool.h"
 #include "emp-ot/emp-ot.h"
+#include "emp-ot/ferret/role.h"
 #include "emp-ot/ferret/twokeyprp.h"
 #include <span>
 
@@ -10,13 +12,13 @@ using namespace emp;
 
 // receive the message and reconstruct the tree
 // j: position of the secret, begins from 0
-void spcot_recv(
+template <Model model>
+void error_point_recv(
     std::span<block> m,
     block secret_sum_f2,
     int depth,
     int choice_pos,
     bool* b,
-    bool malicious,
     block* ggm_tree,
     block *chi_alpha,
     block *W) {
@@ -55,7 +57,7 @@ void spcot_recv(
   }
   ggm_tree[choice_pos] = nodes_sum ^ secret_sum_f2;
 
-  if (malicious) {
+  if (model == Model::Malicious) {
     // check consistency
     std::vector<block> chi(leave_n);
     Hash hash;
@@ -68,9 +70,9 @@ void spcot_recv(
 }
 
 // generate GGM tree, transfer secret, F2^k
-std::pair<block, std::vector<block>> spcot_send(
+template <Model model>
+std::pair<block, std::vector<block>> error_point_send(
     int depth,
-    bool malicious,
     block* ggm_tree,
     block delta,
     block* V) {
@@ -110,7 +112,7 @@ std::pair<block, std::vector<block>> spcot_send(
   secret_sum_f2 = secret_sum_f2 ^ delta;
 
 
-  if (malicious) {
+  if (model == Model::Malicious) {
     // consistency check
     std::vector<block> chi(leave_n);
     Hash hash;
