@@ -116,6 +116,12 @@ struct FerretCOT {
     return ot_output_n;
   }
 
+  std::vector<block> extend(NetIO& io, std::size_t n) {
+    std::vector<block> out(byte_memory_need_inplace(n));
+    extend(io, out);
+    return out;
+  }
+
   std::size_t byte_memory_need_inplace(std::size_t ot_need) {
     std::size_t round = (ot_need - 1) / REGULAR.limit;
     return round * REGULAR.limit + REGULAR.n;
