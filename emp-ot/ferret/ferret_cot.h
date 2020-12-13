@@ -33,6 +33,40 @@ static constexpr MpDesc PRE = {
 };
 
 
+template <Model model, Role role>
+std::vector<block> base_cot(
+    NetIO& io,
+    block delta,
+    bool* choices,
+    std::size_t n) {
+  const auto minusone = makeBlock(0xFFFFFFFFFFFFFFFFLL,0xFFFFFFFFFFFFFFFELL);
+
+  bool malicious = model == Model::Malicious;
+  IKNP<NetIO> iknp { &io, malicious };
+
+  std::vector<block> buffer(n);
+  if constexpr (role == Role::Sender) {
+    iknp.setup_send(delta);
+    iknp.send_cot(buffer.data(), n);
+    io.flush();
+    for(int i = 0; i < n; ++i) {
+      buffer[i] = buffer[i] & minusone;
+    }
+
+  } else {
+    iknp.setup_recv();
+    iknp.recv_cot(buffer.data(), choices, n);
+    block ch[2];
+    ch[0] = zero_block;
+    ch[1] = makeBlock(0, 1);
+    for (int i = 0; i < n; ++i) {
+      buffer[i] = (buffer[i] & minusone) ^ ch[choices[i]];
+    }
+  }
+  return buffer;
+}
+
+
 /*
  * Ferret COT binary version
  * [REF] Implementation of "Ferret: Fast Extension for coRRElated oT with small communication"
@@ -40,28 +74,70 @@ static constexpr MpDesc PRE = {
  *
  */
 template<Model model, Role role, std::size_t threads>
-class FerretCOT {
-public:
+struct FerretCOT {
   block delta;
+  std::vector<block> small_correlation;
 
-  static FerretCOT make(NetIO* io);
+  static FerretCOT make(NetIO& io) {
+    FerretCOT out;
 
-  std::size_t rcot_inplace(std::span<block>);
+    if constexpr (role == Role::Sender) {
+      PRG prg;
+      prg.random_block(&out.delta);
+      out.delta = out.delta | 0x1;
+    }
 
-  std::size_t byte_memory_need_inplace(std::size_t ot_need);
+    std::unique_ptr<bool[]> choices;
+    if constexpr (role == Role::Receiver) {
+      PRG prg;
+      choices = std::unique_ptr<bool[]>(new bool[PRE.m]);
+      prg.random_bool(choices.get(), PRE.m);
+    }
 
-private:
-  NetIO* io;
+    auto init = base_cot<model, role>(io, out.delta, choices.get(), PRE.m);
 
-  std::vector<block> ot_pre_data;
+    out.small_correlation.resize(PRE.n);
+    out.lpn_extension(PRE, io, out.small_correlation, init);
 
-  void extend(
-      const MpDesc&,
-      std::span<block> ot_output,
-      std::span<block> ot_input);
+    return out;
+  }
+
+  std::size_t extend(NetIO& io, std::span<block> buf) {
+    if (buf.size() < REGULAR.n || (buf.size() - REGULAR.m) % REGULAR.limit != 0) {
+      error("Insufficient space. Use `byte_memory_need_inplace` to compute needed space.");
+    }
+    std::size_t ot_output_n = buf.size() - REGULAR.m;
+    std::size_t round = ot_output_n / REGULAR.limit;
+    for (std::size_t i = 0; i < round; ++i) {
+      lpn_extension(REGULAR, io, buf, small_correlation);
+      buf = buf.subspan(REGULAR.limit);
+      std::copy(buf.begin(), buf.begin() + REGULAR.m, small_correlation.begin());
+    }
+    return ot_output_n;
+  }
+
+  std::size_t byte_memory_need_inplace(std::size_t ot_need) {
+    std::size_t round = (ot_need - 1) / REGULAR.limit;
+    return round * REGULAR.limit + REGULAR.n;
+  }
+
+  void lpn_extension(const MpDesc& desc, NetIO& io, std::span<block> tar, std::span<block> src) {
+    block seed;
+    { // gen seed
+      if constexpr (role == Role::Sender) {
+        PRG prg;
+        prg.random_block(&seed, 1);
+        io.send_data(&seed, sizeof(block));
+      } else {
+        io.recv_data(&seed, sizeof(block));
+      }
+      io.flush();
+    }
+    lpn_error<model, role, threads>(desc, &io, delta, tar.data(), src);
+    sparse_linear_code<role>(desc, seed, threads, tar, src.subspan(CONSIST_CHECK_COT_NUM));
+  }
 };
 
-#include "emp-ot/ferret/ferret_cot.hpp"
 }
 
 #endif// _VOLE_H_

@@ -8,7 +8,7 @@
 #include "emp-ot/ferret/twokeyprp.h"
 #include <span>
 
-using namespace emp;
+namespace emp {
 
 // receive the message and reconstruct the tree
 // j: position of the secret, begins from 0
@@ -124,6 +124,8 @@ std::pair<block, std::vector<block>> error_point_send(
   }
 
   return { secret_sum_f2, m };
+}
+
 }
 
 #endif
