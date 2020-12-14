@@ -6,11 +6,11 @@ using namespace emp;
 
 template <typename T>
 double test_rcot(T* ot, NetIO& io, int party, int length) {
-  PRG prg;
+  GT::PRG prg;
 
   auto start = clock_start();
 
-  auto b = ot->extend(io, length);
+  auto b = ot->extend(io, prg, length);
 
   long long t = time_from(start);
   io.sync();

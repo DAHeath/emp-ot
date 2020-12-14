@@ -4,8 +4,8 @@
 #include <emp-tool/emp-tool.h>
 #include <set>
 #include <unordered_set>
-#include "emp-ot/ferret/lpn_error_point.h"
 #include "emp-ot/ferret/role.h"
+#include "emp-ot/ferret/dpf.h"
 
 namespace emp {
 
@@ -23,13 +23,13 @@ struct MpDesc {
 
 
 // Select a random size n subset of the range [0..cap)
-std::vector<std::uint32_t> range_subset(std::uint32_t cap, std::size_t n) {
-  PRG prg;
+std::vector<std::uint32_t> range_subset(GT::PRG& prg, std::uint32_t cap, std::size_t n) {
   std::uint32_t xs[4];
   std::unordered_set<std::uint32_t> s;
   while (s.size() < n) {
     // prg produces 128 bits per call, so fill four words at once
-    prg.random_data(xs, sizeof(std::uint32_t)*4);
+    std::bitset<128> r = prg();
+    memcpy(xs, &r, 16);
     s.insert(xs[0] % cap);
     s.insert(xs[1] % cap);
     s.insert(xs[2] % cap);
@@ -46,18 +46,20 @@ std::vector<std::uint32_t> range_subset(std::uint32_t cap, std::size_t n) {
 // MPFSS F_2k
 template<Model model, Role role, std::size_t threads>
 void lpn_error(
-  const MpDesc& desc, NetIO* io,
+    const MpDesc& desc,
+    NetIO* io,
+    GT::PRG& prg,
     std::bitset<128> delta,
     std::bitset<128> * sparse_vector,
     std::span<std::bitset<128>> pre_cot_data) {
   auto tree_height = desc.bin_sz+1;
-  int leave_n = 1<<(tree_height-1);
+  std::size_t leave_n = 1<<(tree_height-1);
 
   std::unique_ptr<bool[]> bs(new bool[(tree_height-1)*desc.t]);
   std::vector<std::uint32_t> positions;
   // make single point ot choices
   if constexpr (role == Role::Receiver) {
-    positions = range_subset(desc.n, desc.t);
+    positions = range_subset(prg, desc.n, desc.t);
 
     bs = std::unique_ptr<bool[]>(new bool[(tree_height-1)*desc.t]);
 
@@ -95,12 +97,11 @@ void lpn_error(
   io->flush();
 
   int width = (desc.t+threads)/(threads+1);
-  std::vector<std::bitset<128>> blocks(2 * desc.t * desc.bin_sz);
+  std::vector<std::bitset<128>> pad(2 * desc.t * desc.bin_sz);
   std::vector<std::bitset<128>> secret_sums_f2(desc.t);
 
-
   if (role == Role::Receiver) {
-    io->recv_block((block*)blocks.data(), blocks.size());
+    io->recv_block((block*)pad.data(), pad.size());
     io->recv_block((block*)secret_sums_f2.data(), secret_sums_f2.size());
   }
 
@@ -116,39 +117,21 @@ void lpn_error(
     std::size_t start = i * width;
     std::size_t end = std::min((std::size_t)(i+1)*width, desc.t);
     ths.emplace_back(std::thread { [&, start, end] {
-      GT::PRG prg;
       for (std::size_t j = start; j < end; ++j) {
-        std::bitset<128>* ggm_tree = sparse_vector+j*leave_n;
-        std::span<std::bitset<128>> pad = blocks;
-        pad = pad.subspan(j * 2*desc.bin_sz, 2*desc.bin_sz);
+        auto subvector = std::span { sparse_vector + j*leave_n, leave_n };
+        std::size_t k = j*desc.bin_sz;
 
         if constexpr (role == Role::Sender) {
-          std::bitset<128> seed = prg();
-          std::vector<std::bitset<128>> m((tree_height-1) * 2);
-
-          // generate GGM tree from the top
-          {
-            auto ot_msg_0 = m.data();
-            auto ot_msg_1 = m.data() + tree_height - 1;
-            ggm_expand(seed, ggm_tree[0], ggm_tree[1]);
-            ot_msg_0[0] = ggm_tree[0];
-            ot_msg_1[0] = ggm_tree[1];
-            for (std::size_t h = 1; h < tree_height-1; ++h) {
-              ot_msg_0[h] = ot_msg_1[h] = 0;
-              std::size_t sz = 1<<h;
-              for (int i = sz-1; i >= 0; --i) {
-                ggm_expand(ggm_tree[i], ggm_tree[i*2], ggm_tree[i*2+1]);
-                ot_msg_0[h] ^= ggm_tree[i*2];
-                ot_msg_1[h] ^= ggm_tree[i*2+1];
-              }
-            }
-          }
+          const auto messages = dpf_send(tree_height, prg(), subvector);
 
           secret_sums_f2[j] = delta;
-          std::bitset<128> one = (std::bitset<128> { 1 }).flip();
           for (std::size_t i = 0; i < leave_n; ++i) {
-            ggm_tree[i] &= one;
-            secret_sums_f2[j] ^= ggm_tree[i];
+            secret_sums_f2[j] ^= subvector[i];
+          }
+
+          for (int i = 0; i < desc.bin_sz; ++i) {
+            pad[2*(j*desc.bin_sz + i)] = messages[i].first ^ pre_data[k+i + bits[k+i]*n];
+            pad[2*(j*desc.bin_sz + i)+1] = messages[i].second ^ pre_data[k+i + (!bits[k+i])*n];
           }
 
           if (model == Model::Malicious) {
@@ -159,16 +142,7 @@ void lpn_error(
             hash.hash_once(digest, &secret_sums_f2[j], sizeof(block));
             uni_hash_coeff_gen((block*)chi.data(), digest[0], leave_n);
 
-            vector_inn_prdt_sum_red((block*)&consist_check_VW[j], (block*)chi.data(), (block*)ggm_tree, leave_n);
-          }
-
-          auto m0 = m.data();
-          auto m1 = &m[tree_height-1];
-
-          int k = j*desc.bin_sz;
-          for (int i = 0; i < desc.bin_sz; ++i) {
-            pad[2*i] = m0[i] ^ pre_data[k+i + bits[k+i]*n];
-            pad[2*i+1] = m1[i] ^ pre_data[k+i + (!bits[k+i])*n];
+            vector_inn_prdt_sum_red((block*)&consist_check_VW[j], (block*)chi.data(), (block*)subvector.data(), leave_n);
           }
         } else {
           std::vector<std::bitset<128>> m(tree_height-1);
@@ -177,41 +151,15 @@ void lpn_error(
           int k = j*desc.bin_sz;
 
           for (int i = 0; i < desc.bin_sz; ++i) {
-            m[i] = pre_data[k+i] ^ pad[2*i + b[i]];
+            m[i] = pre_data[k+i] ^ pad[2*(j*desc.bin_sz + i) + b[i]];
           }
 
-          { // gmm tree reconstruction
-            int to_fill_idx = 0;
-            for (int i = 0; i < tree_height-1; ++i) {
-              // reconstruct a layer of the ggm tree
-              to_fill_idx = to_fill_idx * 2;
-              ggm_tree[to_fill_idx] = ggm_tree[to_fill_idx+1] = 0;
-              int item_n = 1<< (i+1);
+          dpf_recv(tree_height, std::span<const bool> { b, tree_height-1 }, m, subvector);
 
-              std::bitset<128> nodes_sum = 0;
-              for (std::size_t j = b[i] != 0; j < item_n; j+=2) {
-                nodes_sum ^= ggm_tree[j];
-              }
-
-              ggm_tree[to_fill_idx + b[i]] = nodes_sum ^ m[i];
-              if (i+1 != tree_height-1) {
-                for (int j = item_n-1; j >= 0; --j) {
-                  ggm_expand(ggm_tree[j], ggm_tree[j*2], ggm_tree[j*2+1]);
-                }
-              }
-              to_fill_idx += !b[i];
-            }
-          }
-
-          int choice_pos = positions[j]%leave_n;
-          ggm_tree[choice_pos] = 0;
-          std::bitset<128> one = (std::bitset<128> { 1 }).flip();
-          std::bitset<128> nodes_sum = 0;
-          for(int i = 0; i < leave_n; ++i) {
-            ggm_tree[i] &= one;
-            nodes_sum ^= ggm_tree[i];
-          }
-          ggm_tree[choice_pos] = nodes_sum ^ secret_sums_f2[j];
+          std::size_t choice_pos = positions[j]%leave_n;
+          std::bitset<128> sum = 0;
+          for (int i = 0; i < leave_n; ++i) { sum ^= subvector[i]; }
+          subvector[choice_pos] ^= sum ^ secret_sums_f2[j];
 
           if (model == Model::Malicious) {
             // check consistency
@@ -222,7 +170,7 @@ void lpn_error(
             uni_hash_coeff_gen((block*)chi.data(), digest[0], leave_n);
             auto chi_alpha = chi[choice_pos];
             std::bitset<128> W;
-            vector_inn_prdt_sum_red((block*)&W, (block*)chi.data(), (block*)ggm_tree, leave_n);
+            vector_inn_prdt_sum_red((block*)&W, (block*)chi.data(), (block*)subvector.data(), leave_n);
 
             consist_check_chi_alpha[j] = chi_alpha;
             consist_check_VW[j] = W;
@@ -233,7 +181,7 @@ void lpn_error(
   for (auto& th : ths) { th.join(); }
 
   if constexpr (role == Role::Sender) {
-    io->send_block((block*)blocks.data(), blocks.size());
+    io->send_block((block*)pad.data(), pad.size());
     io->send_block((block*)secret_sums_f2.data(), secret_sums_f2.size());
     io->flush();
   }
