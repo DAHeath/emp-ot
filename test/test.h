@@ -15,20 +15,23 @@ double test_rcot(T* ot, NetIO& io, int party, int length) {
   long long t = time_from(start);
   io.sync();
   if (party == ALICE) {
-    io.send_block(&ot->delta, 1);
-    io.send_block(b.data(), b.size());
+    io.send_block((block*)&ot->delta, 1);
+    io.send_block((block*)b.data(), b.size());
   }
   else if (party == BOB) {
-    block ch[2];
-    ch[0] = zero_block;
-    block *b0 = new block[b.size()];
-    io.recv_block(ch+1, 1);
-    io.recv_block(b0, b.size());
+    std::bitset<128> ch[2];
+    ch[0] = 0;
+    std::bitset<128>* b0 = new std::bitset<128>[b.size()];
+    io.recv_block((block*)ch+1, 1);
+    io.recv_block((block*)b0, b.size());
     for (size_t i = 0; i < b.size(); ++i) {
-      b[i] = b[i] ^ ch[getLSB(b[i])];
+      b[i] ^= ch[b[i][0]];
     }
-    if (!cmpBlock(b.data(), b0, b.size()))
-      error("RCOT failed");
+    for (std::size_t i = 0; i < b.size(); ++i) {
+      if (b[i] != b0[i]) {
+        error("RCOT failed");
+      }
+    }
     delete[] b0;
   }
   std::cout << "Tests passed.\t";

@@ -47,9 +47,9 @@ std::vector<std::uint32_t> range_subset(std::uint32_t cap, std::size_t n) {
 template<Model model, Role role, std::size_t threads>
 void lpn_error(
   const MpDesc& desc, NetIO* io,
-    block delta,
-    block * sparse_vector,
-    std::span<block> pre_cot_data) {
+    std::bitset<128> delta,
+    std::bitset<128> * sparse_vector,
+    std::span<std::bitset<128>> pre_cot_data) {
   auto tree_height = desc.bin_sz+1;
   int leave_n = 1<<(tree_height-1);
 
@@ -75,19 +75,19 @@ void lpn_error(
 
   auto n = desc.bin_sz * desc.t;
 
-  std::vector<block> pre_data(2*n);
+  std::vector<std::bitset<128>> pre_data(2*n);
   std::unique_ptr<bool[]> bits(new bool[n]);
   { // pre OT
     CCRH ccrh;
     if constexpr (role == Role::Sender) {
-      ccrh.Hn(pre_data.data(), pre_cot_data.data(), 0, n, pre_data.data()+n);
-      xorBlocks_arr(pre_data.data()+n, pre_cot_data.data(), delta, n);
-      ccrh.Hn(pre_data.data()+n, pre_data.data()+n, 0, n);
+      ccrh.Hn((block*)pre_data.data(), (block*)pre_cot_data.data(), 0, n, (block*)pre_data.data()+n);
+      xorBlocks_arr((block*)pre_data.data()+n, (block*)pre_cot_data.data(), *(block*)&delta, n);
+      ccrh.Hn((block*)pre_data.data()+n, (block*)pre_data.data()+n, 0, n);
       io->recv_data(bits.get(), n);
     } else {
-      ccrh.Hn(pre_data.data(), pre_cot_data.data(), 0, n);
+      ccrh.Hn((block*)pre_data.data(), (block*)pre_cot_data.data(), 0, n);
       for (int i = 0; i < n; ++i) {
-        bits[i] = (bs[i] != getLSB(pre_cot_data[i]));
+        bits[i] = (bs[i] != pre_cot_data[i][0]);
       }
       io->send_data(bits.get(), n);
     }
@@ -95,20 +95,20 @@ void lpn_error(
   io->flush();
 
   int width = (desc.t+threads)/(threads+1);
-  std::vector<block> blocks(2 * desc.t * desc.bin_sz);
-  std::vector<block> secret_sums_f2(desc.t);
+  std::vector<std::bitset<128>> blocks(2 * desc.t * desc.bin_sz);
+  std::vector<std::bitset<128>> secret_sums_f2(desc.t);
 
 
   if (role == Role::Receiver) {
-    io->recv_block(blocks.data(), blocks.size());
-    io->recv_block(secret_sums_f2.data(), secret_sums_f2.size());
+    io->recv_block((block*)blocks.data(), blocks.size());
+    io->recv_block((block*)secret_sums_f2.data(), secret_sums_f2.size());
   }
 
-  std::vector<block> consist_check_chi_alpha;
+  std::vector<std::bitset<128>> consist_check_chi_alpha;
   if constexpr (role == Role::Receiver) {
-    consist_check_chi_alpha = std::vector<block>(desc.t);
+    consist_check_chi_alpha = std::vector<std::bitset<128>>(desc.t);
   }
-  std::vector<block> consist_check_VW(desc.t);
+  std::vector<std::bitset<128>> consist_check_VW(desc.t);
 
   // execute the single-point OTs in parallel
   std::vector<std::thread> ths;
@@ -117,7 +117,7 @@ void lpn_error(
     int end = std::min((std::size_t)(i+1)*width, desc.t);
     ths.emplace_back(std::thread { [&, start, end] {
       for (int j = start; j < end; ++j) {
-        std::span<block> pad = blocks;
+        std::span<std::bitset<128>> pad = blocks;
         pad = pad.subspan(j * 2*desc.bin_sz, 2*desc.bin_sz);
 
         if constexpr (role == Role::Sender) {
@@ -137,7 +137,7 @@ void lpn_error(
             pad[2*i+1] = m1[i] ^ pre_data[k+i + (!bits[k+i])*n];
           }
         } else {
-          std::vector<block> m(tree_height-1);
+          std::vector<std::bitset<128>> m(tree_height-1);
 
           auto b = bs.get() + j*(tree_height-1);
           int k = j*desc.bin_sz;
@@ -161,8 +161,8 @@ void lpn_error(
   for (auto& th : ths) { th.join(); }
 
   if constexpr (role == Role::Sender) {
-    io->send_block(blocks.data(), blocks.size());
-    io->send_block(secret_sums_f2.data(), secret_sums_f2.size());
+    io->send_block((block*)blocks.data(), blocks.size());
+    io->send_block((block*)secret_sums_f2.data(), secret_sums_f2.size());
     io->flush();
   }
 
@@ -171,14 +171,14 @@ void lpn_error(
     GaloisFieldPacking pack;
     if constexpr (role == Role::Sender) {
       block r1, r2;
-      vector_self_xor(&r1, consist_check_VW.data(), desc.t);
+      vector_self_xor(&r1, (block*)consist_check_VW.data(), desc.t);
       bool x_prime[128];
       io->recv_data(x_prime, 128*sizeof(bool));
       for(int i = 0; i < 128; ++i) {
         if(x_prime[i])
           pre_cot_data[i] = pre_cot_data[i] ^ delta;
       }
-      pack.packing(&r2, pre_cot_data.data());
+      pack.packing(&r2, (block*)pre_cot_data.data());
       r1 = r1 ^ r2;
       block dig[2];
       Hash hash;
@@ -187,21 +187,21 @@ void lpn_error(
       io->flush();
     } else {
       block r1, r2, r3;
-      vector_self_xor(&r1, consist_check_VW.data(), desc.t);
-      vector_self_xor(&r2, consist_check_chi_alpha.data(), desc.t);
+      vector_self_xor(&r1, (block*)consist_check_VW.data(), desc.t);
+      vector_self_xor(&r2, (block*)consist_check_chi_alpha.data(), desc.t);
       uint64_t pos[2];
       pos[0] = _mm_extract_epi64(r2, 0);
       pos[1] = _mm_extract_epi64(r2, 1);
       bool pre_cot_bool[128];
       for (int i = 0; i < 2; ++i) {
         for (int j = 0; j < 64; ++j) {
-          pre_cot_bool[i*64+j] = ((pos[i] & 1) == 1) ^ getLSB(pre_cot_data[i*64+j]);
+          pre_cot_bool[i*64+j] = ((pos[i] & 1) == 1) ^ pre_cot_data[i*64+j][0];
           pos[i] >>= 1;
         }
       }
       io->send_data(pre_cot_bool, 128*sizeof(bool));
       io->flush();
-      pack.packing(&r3, pre_cot_data.data());
+      pack.packing(&r3, (block*)pre_cot_data.data());
       r1 = r1 ^ r3;
       block dig[2];
       Hash hash;

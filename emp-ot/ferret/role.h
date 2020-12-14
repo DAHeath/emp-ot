@@ -2,6 +2,9 @@
 #define ROLE_H__
 
 
+#include <bitset>
+
+
 enum class Role {
   Sender,
   Receiver

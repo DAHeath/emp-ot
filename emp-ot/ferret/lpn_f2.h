@@ -11,19 +11,19 @@ using namespace emp;
 // Performance highly dependent on the CPU cache size
 template<Role role, int d = 10>
 void sparse_linear_code(
-    const MpDesc& desc, const block& seed, int threads,
-    std::span<block> nn,
-    std::span<const block> kk) {
+    const MpDesc& desc, const std::bitset<128>& seed, int threads,
+    std::span<std::bitset<128>> nn,
+    std::span<const std::bitset<128>> kk) {
 
   const auto task = [=](int start, int end) {
-    PRP prp(seed);
+    PRP prp(*(const block*)&seed);
     int j = start;
-    block tmp[10];
+    std::bitset<128> tmp[10];
     for (; j < end-4; j+=4) {
       for (int m = 0; m < 10; ++m) {
-        tmp[m] = makeBlock(j, m);
+        tmp[m] = std::bitset<128> { static_cast<unsigned long long>((j << 8) + m) };
       }
-      AES_ecb_encrypt_blks(tmp, 10, &prp.aes);
+      AES_ecb_encrypt_blks((block*)tmp, 10, &prp.aes);
       uint32_t* r = reinterpret_cast<uint32_t*>(tmp);
       for (int m = 0; m < 4; ++m) {
         for (int ix = 0; ix < d; ++ix) {
@@ -37,9 +37,9 @@ void sparse_linear_code(
     }
     for (; j < end; ++j) {
       for (int m = 0; m < 3; ++m) {
-        tmp[m] = makeBlock(j, m);
+        tmp[m] = std::bitset<128> { static_cast<unsigned long long>((j << 8) + m) };
       }
-      AES_ecb_encrypt_blks(tmp, 3, &prp.aes);
+      AES_ecb_encrypt_blks((block*)tmp, 3, &prp.aes);
       uint32_t* r = (uint32_t*)(tmp);
       for (int ix = 0; ix < d; ++ix) {
         nn[j] = nn[j] ^ kk[r[ix]%desc.k];

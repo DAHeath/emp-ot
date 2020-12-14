@@ -3,7 +3,6 @@
 
 #include "emp-ot/ferret/lpn_error.h"
 #include "emp-ot/ferret/lpn_f2.h"
-
 #include "emp-ot/ferret/role.h"
 
 #include <span>
@@ -34,20 +33,22 @@ static constexpr MpDesc PRE = {
 
 
 template <Model model, Role role>
-std::vector<block> base_cot(
+std::vector<std::bitset<128>> base_cot(
     NetIO& io,
-    block delta,
+    std::bitset<128> delta,
     bool* choices,
     std::size_t n) {
-  const auto minusone = makeBlock(0xFFFFFFFFFFFFFFFFLL,0xFFFFFFFFFFFFFFFELL);
+  const auto minusone = std::bitset<128>(1).flip();
 
   bool malicious = model == Model::Malicious;
   IKNP<NetIO> iknp { &io, malicious };
 
-  std::vector<block> buffer(n);
+  std::vector<std::bitset<128>> buffer(n);
   if constexpr (role == Role::Sender) {
-    iknp.setup_send(delta);
-    iknp.send_cot(buffer.data(), n);
+    block delta2;
+    memcpy(&delta2, &delta, sizeof(delta));
+    iknp.setup_send(delta2);
+    iknp.send_cot((block*)buffer.data(), n);
     io.flush();
     for(int i = 0; i < n; ++i) {
       buffer[i] = buffer[i] & minusone;
@@ -55,10 +56,10 @@ std::vector<block> base_cot(
 
   } else {
     iknp.setup_recv();
-    iknp.recv_cot(buffer.data(), choices, n);
-    block ch[2];
-    ch[0] = zero_block;
-    ch[1] = makeBlock(0, 1);
+    iknp.recv_cot((block*)buffer.data(), choices, n);
+    std::bitset<128> ch[2];
+    ch[0] = 0;
+    ch[1] = 1;
     for (int i = 0; i < n; ++i) {
       buffer[i] = (buffer[i] & minusone) ^ ch[choices[i]];
     }
@@ -75,16 +76,18 @@ std::vector<block> base_cot(
  */
 template<Model model, Role role, std::size_t threads>
 struct FerretCOT {
-  block delta;
-  std::vector<block> small_correlation;
+  std::bitset<128> delta;
+  std::vector<std::bitset<128>> small_correlation;
 
   static FerretCOT make(NetIO& io) {
     FerretCOT out;
 
     if constexpr (role == Role::Sender) {
       PRG prg;
-      prg.random_block(&out.delta);
-      out.delta = out.delta | 0x1;
+      block delta;
+      prg.random_block(&delta);
+      memcpy(&out.delta, &delta, sizeof(delta));
+      out.delta |= std::bitset<128> { 1 };
     }
 
     std::unique_ptr<bool[]> choices;
@@ -102,7 +105,7 @@ struct FerretCOT {
     return out;
   }
 
-  std::size_t extend(NetIO& io, std::span<block> buf) {
+  std::size_t extend(NetIO& io, std::span<std::bitset<128>> buf) {
     if (buf.size() < REGULAR.n || (buf.size() - REGULAR.m) % REGULAR.limit != 0) {
       error("Insufficient space. Use `byte_memory_need_inplace` to compute needed space.");
     }
@@ -116,8 +119,8 @@ struct FerretCOT {
     return ot_output_n;
   }
 
-  std::vector<block> extend(NetIO& io, std::size_t n) {
-    std::vector<block> out(byte_memory_need_inplace(n));
+  std::vector<std::bitset<128>> extend(NetIO& io, std::size_t n) {
+    std::vector<std::bitset<128>> out(byte_memory_need_inplace(n));
     extend(io, out);
     return out;
   }
@@ -127,15 +130,15 @@ struct FerretCOT {
     return round * REGULAR.limit + REGULAR.n;
   }
 
-  void lpn_extension(const MpDesc& desc, NetIO& io, std::span<block> tar, std::span<block> src) {
-    block seed;
+  void lpn_extension(const MpDesc& desc, NetIO& io, std::span<std::bitset<128>> tar, std::span<std::bitset<128>> src) {
+    std::bitset<128> seed;
     { // gen seed
       if constexpr (role == Role::Sender) {
         PRG prg;
-        prg.random_block(&seed, 1);
-        io.send_data(&seed, sizeof(block));
+        prg.random_block((block*)&seed, 1);
+        io.send_data(&seed, sizeof(std::bitset<128>));
       } else {
-        io.recv_data(&seed, sizeof(block));
+        io.recv_data(&seed, sizeof(std::bitset<128>));
       }
       io.flush();
     }
@@ -146,4 +149,4 @@ struct FerretCOT {
 
 }
 
-#endif// _VOLE_H_
+#endif
