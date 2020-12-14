@@ -31,7 +31,7 @@ void sparse_linear_code(
           int index = (*r) & desc.mask;
           ++r;
           index = index >= desc.k ? index-desc.k : index;
-          nn[j+m] = nn[j+m] ^ kk[index];
+          nn[j+m] ^= kk[index];
         }
       }
     }
@@ -42,7 +42,7 @@ void sparse_linear_code(
       AES_ecb_encrypt_blks((block*)tmp, 3, &prp.aes);
       uint32_t* r = (uint32_t*)(tmp);
       for (int ix = 0; ix < d; ++ix) {
-        nn[j] = nn[j] ^ kk[r[ix]%desc.k];
+        nn[j] ^= kk[r[ix]%desc.k];
       }
     }
   };

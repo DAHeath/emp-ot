@@ -4,6 +4,7 @@
 #include "emp-ot/ferret/lpn_error.h"
 #include "emp-ot/ferret/lpn_f2.h"
 #include "emp-ot/ferret/role.h"
+#include "emp-ot/ferret/gtprg.h"
 
 #include <span>
 
@@ -72,7 +73,6 @@ std::vector<std::bitset<128>> base_cot(
  * Ferret COT binary version
  * [REF] Implementation of "Ferret: Fast Extension for coRRElated oT with small communication"
  * https://eprint.iacr.org/2020/924.pdf
- *
  */
 template<Model model, Role role, std::size_t threads>
 struct FerretCOT {
@@ -83,11 +83,8 @@ struct FerretCOT {
     FerretCOT out;
 
     if constexpr (role == Role::Sender) {
-      PRG prg;
-      block delta;
-      prg.random_block(&delta);
-      memcpy(&out.delta, &delta, sizeof(delta));
-      out.delta |= std::bitset<128> { 1 };
+      GT::PRG prg;
+      out.delta = prg() | std::bitset<128> { 1 };
     }
 
     std::unique_ptr<bool[]> choices;
@@ -134,8 +131,8 @@ struct FerretCOT {
     std::bitset<128> seed;
     { // gen seed
       if constexpr (role == Role::Sender) {
-        PRG prg;
-        prg.random_block((block*)&seed, 1);
+        GT::PRG prg;
+        seed = prg();
         io.send_data(&seed, sizeof(std::bitset<128>));
       } else {
         io.recv_data(&seed, sizeof(std::bitset<128>));

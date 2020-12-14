@@ -6,6 +6,7 @@
 #include "emp-ot/emp-ot.h"
 #include "emp-ot/ferret/role.h"
 #include "emp-ot/ferret/twokeyprp.h"
+#include "emp-ot/ferret/gtprg.h"
 #include <span>
 
 namespace emp {
@@ -26,7 +27,7 @@ void error_point_recv(
   int leave_n = 1<<(depth-1);
   { // gmm tree reconstruction
     int to_fill_idx = 0;
-    TwoKeyPRP prp(zero_block, makeBlock(0, 1));
+    TwoKeyPRP prp { 0, 1 };
     for (int i = 0; i < depth-1; ++i) {
       // reconstruct a layer of the ggm tree
       to_fill_idx = to_fill_idx * 2;
@@ -35,13 +36,14 @@ void error_point_recv(
 
       std::bitset<128> nodes_sum = 0;
       for (int j = b[i] != 0; j < item_n; j+=2) {
-        nodes_sum = nodes_sum ^ ggm_tree[j];
+        nodes_sum ^= ggm_tree[j];
       }
 
       ggm_tree[to_fill_idx + b[i]] = nodes_sum ^ m[i];
       if (i+1 != depth-1) {
         for (int j = item_n-2; j >= 0; j-=2) {
-          prp.node_expand_2to4((block*)&ggm_tree[j*2], (block*)&ggm_tree[j]);
+          /* prp.node_expand_2to4((block*)&ggm_tree[j*2], (block*)&ggm_tree[j]); */
+          prp.node_expand_2to4(&ggm_tree[j*2], &ggm_tree[j]);
         }
       }
       to_fill_idx += !b[i];
@@ -76,9 +78,8 @@ std::pair<std::bitset<128>, std::vector<std::bitset<128>>> error_point_send(
     std::bitset<128>* ggm_tree,
     std::bitset<128> delta,
     std::bitset<128>* V) {
-  PRG prg;
-  block seed;
-  prg.random_block(&seed, 1);
+  GT::PRG prg;
+  std::bitset<128> seed = prg();
   int leave_n = 1 << (depth - 1);
   std::vector<std::bitset<128>> m((depth-1) * 2);
 
@@ -86,15 +87,15 @@ std::pair<std::bitset<128>, std::vector<std::bitset<128>>> error_point_send(
   {
     auto ot_msg_0 = m.data();
     auto ot_msg_1 = m.data() + depth - 1;
-    TwoKeyPRP prp = { zero_block, makeBlock(0, 1) };
-    prp.node_expand_1to2((block*)ggm_tree, seed);
+    TwoKeyPRP prp { 0, 1 };
+    prp.node_expand_1to2(ggm_tree, seed);
     ot_msg_0[0] = ggm_tree[0];
     ot_msg_1[0] = ggm_tree[1];
     for(int h = 1; h < depth-1; ++h) {
       ot_msg_0[h] = ot_msg_1[h] = 0;
       int sz = 1<<h;
       for(int i = sz-2; i >=0; i-=2) {
-        prp.node_expand_2to4((block*)&ggm_tree[i*2], (block*)&ggm_tree[i]);
+        prp.node_expand_2to4(&ggm_tree[i*2], &ggm_tree[i]);
         ot_msg_0[h] = ot_msg_0[h] ^ ggm_tree[i*2];
         ot_msg_0[h] = ot_msg_0[h] ^ ggm_tree[i*2+2];
         ot_msg_1[h] = ot_msg_1[h] ^ ggm_tree[i*2+1];
@@ -109,7 +110,7 @@ std::pair<std::bitset<128>, std::vector<std::bitset<128>>> error_point_send(
     ggm_tree[i] &= one;
     secret_sum_f2 ^= ggm_tree[i];
   }
-  secret_sum_f2 = secret_sum_f2 ^ delta;
+  secret_sum_f2 ^= delta;
 
 
   if (model == Model::Malicious) {
