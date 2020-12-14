@@ -5,11 +5,19 @@
 #include "emp-tool/emp-tool.h"
 #include "emp-ot/emp-ot.h"
 #include "emp-ot/ferret/role.h"
-#include "emp-ot/ferret/twokeyprp.h"
 #include "emp-ot/ferret/gtprg.h"
 #include <span>
 
 namespace emp {
+
+
+void ggm_expand(std::bitset<128>* children, const std::bitset<128>& parent) {
+  static GT::PRP f0(0);
+  static GT::PRP f1(1);
+  children[0] = f0(parent);
+  children[1] = f1(parent);
+}
+
 
 // receive the message and reconstruct the tree
 // j: position of the secret, begins from 0
@@ -27,7 +35,6 @@ void error_point_recv(
   int leave_n = 1<<(depth-1);
   { // gmm tree reconstruction
     int to_fill_idx = 0;
-    TwoKeyPRP prp { 0, 1 };
     for (int i = 0; i < depth-1; ++i) {
       // reconstruct a layer of the ggm tree
       to_fill_idx = to_fill_idx * 2;
@@ -41,9 +48,8 @@ void error_point_recv(
 
       ggm_tree[to_fill_idx + b[i]] = nodes_sum ^ m[i];
       if (i+1 != depth-1) {
-        for (int j = item_n-2; j >= 0; j-=2) {
-          /* prp.node_expand_2to4((block*)&ggm_tree[j*2], (block*)&ggm_tree[j]); */
-          prp.node_expand_2to4(&ggm_tree[j*2], &ggm_tree[j]);
+        for (int j = item_n-1; j >= 0; --j) {
+          ggm_expand(&ggm_tree[j*2], ggm_tree[j]);
         }
       }
       to_fill_idx += !b[i];
@@ -87,19 +93,16 @@ std::pair<std::bitset<128>, std::vector<std::bitset<128>>> error_point_send(
   {
     auto ot_msg_0 = m.data();
     auto ot_msg_1 = m.data() + depth - 1;
-    TwoKeyPRP prp { 0, 1 };
-    prp.node_expand_1to2(ggm_tree, seed);
+    ggm_expand(ggm_tree, seed);
     ot_msg_0[0] = ggm_tree[0];
     ot_msg_1[0] = ggm_tree[1];
     for(int h = 1; h < depth-1; ++h) {
       ot_msg_0[h] = ot_msg_1[h] = 0;
       int sz = 1<<h;
-      for(int i = sz-2; i >=0; i-=2) {
-        prp.node_expand_2to4(&ggm_tree[i*2], &ggm_tree[i]);
+      for(int i = sz-1; i >=0; --i) {
+        ggm_expand(&ggm_tree[i*2], ggm_tree[i]);
         ot_msg_0[h] = ot_msg_0[h] ^ ggm_tree[i*2];
-        ot_msg_0[h] = ot_msg_0[h] ^ ggm_tree[i*2+2];
         ot_msg_1[h] = ot_msg_1[h] ^ ggm_tree[i*2+1];
-        ot_msg_1[h] = ot_msg_1[h] ^ ggm_tree[i*2+3];
       }
     }
   }
