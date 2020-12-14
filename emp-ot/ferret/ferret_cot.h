@@ -2,7 +2,7 @@
 #define EMP_FERRET_COT_H_
 
 #include "emp-ot/ferret/lpn_error.h"
-#include "emp-ot/ferret/lpn_f2.h"
+#include "emp-ot/ferret/sparse_linear_code.h"
 #include "emp-ot/ferret/role.h"
 #include "emp-ot/ferret/gtprg.h"
 

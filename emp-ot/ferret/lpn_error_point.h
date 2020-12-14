@@ -11,11 +11,14 @@
 namespace emp {
 
 
-void ggm_expand(std::bitset<128>* children, const std::bitset<128>& parent) {
+void ggm_expand(
+    const std::bitset<128>& parent,
+    std::bitset<128>& child0,
+    std::bitset<128>& child1) {
   static GT::PRP f0(0);
   static GT::PRP f1(1);
-  children[0] = f0(parent);
-  children[1] = f1(parent);
+  child0 = f0(parent);
+  child1 = f1(parent);
 }
 
 
@@ -42,14 +45,14 @@ void error_point_recv(
       int item_n = 1<< (i+1);
 
       std::bitset<128> nodes_sum = 0;
-      for (int j = b[i] != 0; j < item_n; j+=2) {
+      for (std::size_t j = b[i] != 0; j < item_n; j+=2) {
         nodes_sum ^= ggm_tree[j];
       }
 
       ggm_tree[to_fill_idx + b[i]] = nodes_sum ^ m[i];
       if (i+1 != depth-1) {
         for (int j = item_n-1; j >= 0; --j) {
-          ggm_expand(&ggm_tree[j*2], ggm_tree[j]);
+          ggm_expand(ggm_tree[j], ggm_tree[j*2], ggm_tree[j*2+1]);
         }
       }
       to_fill_idx += !b[i];
@@ -80,41 +83,40 @@ void error_point_recv(
 // generate GGM tree, transfer secret, F2^k
 template <Model model>
 std::pair<std::bitset<128>, std::vector<std::bitset<128>>> error_point_send(
-    int depth,
+    std::size_t depth,
     std::bitset<128>* ggm_tree,
     std::bitset<128> delta,
     std::bitset<128>* V) {
   GT::PRG prg;
   std::bitset<128> seed = prg();
-  int leave_n = 1 << (depth - 1);
+  std::size_t leave_n = 1 << (depth - 1);
   std::vector<std::bitset<128>> m((depth-1) * 2);
 
   // generate GGM tree from the top
   {
     auto ot_msg_0 = m.data();
     auto ot_msg_1 = m.data() + depth - 1;
-    ggm_expand(ggm_tree, seed);
+    ggm_expand(seed, ggm_tree[0], ggm_tree[1]);
     ot_msg_0[0] = ggm_tree[0];
     ot_msg_1[0] = ggm_tree[1];
-    for(int h = 1; h < depth-1; ++h) {
+    for (std::size_t h = 1; h < depth-1; ++h) {
       ot_msg_0[h] = ot_msg_1[h] = 0;
-      int sz = 1<<h;
-      for(int i = sz-1; i >=0; --i) {
-        ggm_expand(&ggm_tree[i*2], ggm_tree[i]);
-        ot_msg_0[h] = ot_msg_0[h] ^ ggm_tree[i*2];
-        ot_msg_1[h] = ot_msg_1[h] ^ ggm_tree[i*2+1];
+      std::size_t sz = 1<<h;
+      for (int i = sz-1; i >= 0; --i) {
+        ggm_expand(ggm_tree[i], ggm_tree[i*2], ggm_tree[i*2+1]);
+        ot_msg_0[h] ^= ggm_tree[i*2];
+        ot_msg_1[h] ^= ggm_tree[i*2+1];
       }
     }
   }
 
   std::bitset<128> secret_sum_f2 = 0;
   std::bitset<128> one = (std::bitset<128> { 1 }).flip();
-  for(int i = 0; i < leave_n; ++i) {
+  for (std::size_t i = 0; i < leave_n; ++i) {
     ggm_tree[i] &= one;
     secret_sum_f2 ^= ggm_tree[i];
   }
   secret_sum_f2 ^= delta;
-
 
   if (model == Model::Malicious) {
     // consistency check
