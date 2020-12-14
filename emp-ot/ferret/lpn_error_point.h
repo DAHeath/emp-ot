@@ -25,20 +25,18 @@ void ggm_expand(
 // receive the message and reconstruct the tree
 // j: position of the secret, begins from 0
 template <Model model>
-void error_point_recv(
+std::pair<std::bitset<128>, std::bitset<128>> error_point_recv(
     std::span<std::bitset<128>> m,
     std::bitset<128> secret_sum_f2,
-    int depth,
+    int tree_height,
     int choice_pos,
     bool* b,
-    std::bitset<128>* ggm_tree,
-    std::bitset<128> *chi_alpha,
-    std::bitset<128> *W) {
+    std::bitset<128>* ggm_tree) {
 
-  int leave_n = 1<<(depth-1);
+  int leave_n = 1<<(tree_height-1);
   { // gmm tree reconstruction
     int to_fill_idx = 0;
-    for (int i = 0; i < depth-1; ++i) {
+    for (int i = 0; i < tree_height-1; ++i) {
       // reconstruct a layer of the ggm tree
       to_fill_idx = to_fill_idx * 2;
       ggm_tree[to_fill_idx] = ggm_tree[to_fill_idx+1] = 0;
@@ -50,7 +48,7 @@ void error_point_recv(
       }
 
       ggm_tree[to_fill_idx + b[i]] = nodes_sum ^ m[i];
-      if (i+1 != depth-1) {
+      if (i+1 != tree_height-1) {
         for (int j = item_n-1; j >= 0; --j) {
           ggm_expand(ggm_tree[j], ggm_tree[j*2], ggm_tree[j*2+1]);
         }
@@ -75,31 +73,35 @@ void error_point_recv(
     block digest[2];
     hash.hash_once(digest, &secret_sum_f2, sizeof(block));
     uni_hash_coeff_gen((block*)chi.data(), digest[0], leave_n);
-    *chi_alpha = chi[choice_pos];
-    vector_inn_prdt_sum_red((block*)W, (block*)chi.data(), (block*)ggm_tree, leave_n);
+    auto chi_alpha = chi[choice_pos];
+    std::bitset<128> W;
+    vector_inn_prdt_sum_red((block*)&W, (block*)chi.data(), (block*)ggm_tree, leave_n);
+    return { chi_alpha, W };
+  } else {
+    return { 0, 0 };
   }
 }
 
 // generate GGM tree, transfer secret, F2^k
 template <Model model>
 std::pair<std::bitset<128>, std::vector<std::bitset<128>>> error_point_send(
-    std::size_t depth,
+    std::size_t tree_height,
     std::bitset<128>* ggm_tree,
     std::bitset<128> delta,
     std::bitset<128>* V) {
   GT::PRG prg;
   std::bitset<128> seed = prg();
-  std::size_t leave_n = 1 << (depth - 1);
-  std::vector<std::bitset<128>> m((depth-1) * 2);
+  std::size_t leave_n = 1 << (tree_height - 1);
+  std::vector<std::bitset<128>> m((tree_height-1) * 2);
 
   // generate GGM tree from the top
   {
     auto ot_msg_0 = m.data();
-    auto ot_msg_1 = m.data() + depth - 1;
+    auto ot_msg_1 = m.data() + tree_height - 1;
     ggm_expand(seed, ggm_tree[0], ggm_tree[1]);
     ot_msg_0[0] = ggm_tree[0];
     ot_msg_1[0] = ggm_tree[1];
-    for (std::size_t h = 1; h < depth-1; ++h) {
+    for (std::size_t h = 1; h < tree_height-1; ++h) {
       ot_msg_0[h] = ot_msg_1[h] = 0;
       std::size_t sz = 1<<h;
       for (int i = sz-1; i >= 0; --i) {

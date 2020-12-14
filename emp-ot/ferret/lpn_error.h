@@ -146,15 +146,15 @@ void lpn_error(
             m[i] = pre_data[k+i] ^ pad[2*i + b[i]];
           }
 
-          error_point_recv<model>(
+          auto [chi_alpha, W] = error_point_recv<model>(
               m,
               secret_sums_f2[j],
               tree_height,
               positions[j]%leave_n,
               bs.get() + j*(tree_height-1),
-              sparse_vector+j*leave_n,
-              consist_check_chi_alpha.data()+j,
-              consist_check_VW.data()+j);
+              sparse_vector+j*leave_n);
+          consist_check_chi_alpha[j] = chi_alpha;
+          consist_check_VW[j] = W;
         }
       }}});
   }
