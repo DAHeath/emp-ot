@@ -3,7 +3,7 @@
 
 
 #include "emp-tool/emp-tool.h"
-#include "emp-ot/ferret/role.h"
+#include "emp-ot/role.h"
 
 using namespace emp;
 
@@ -21,8 +21,8 @@ void sparse_linear_code(
     int j = start;
     std::bitset<128> tmp[10];
     for (; j < end-4; j+=4) {
-      for (int m = 0; m < 10; ++m) {
-        tmp[m] = std::bitset<128> { static_cast<unsigned long long>((j << 8) + m) };
+      for (std::size_t m = 0; m < 10; ++m) {
+        tmp[m] = std::bitset<128> { (j << 8) + m };
       }
       AES_ecb_encrypt_blks((block*)tmp, 10, &prp.aes);
       uint32_t* r = reinterpret_cast<uint32_t*>(tmp);

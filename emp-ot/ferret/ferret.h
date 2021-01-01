@@ -1,9 +1,9 @@
 #ifndef EMP_FERRET_COT_H_
 #define EMP_FERRET_COT_H_
 
+#include "emp-ot/role.h"
 #include "emp-ot/ferret/lpn_error.h"
 #include "emp-ot/ferret/sparse_linear_code.h"
-#include "emp-ot/ferret/role.h"
 #include "emp-ot/ferret/gtprg.h"
 
 #include <span>
@@ -40,24 +40,18 @@ std::vector<std::bitset<128>> base_cot(
     bool* choices,
     std::size_t n) {
   const auto minusone = std::bitset<128>(1).flip();
-
-  bool malicious = model == Model::Malicious;
-  IKNP<NetIO> iknp { &io, malicious };
-
   std::vector<std::bitset<128>> buffer(n);
   if constexpr (role == Role::Sender) {
     block delta2;
     memcpy(&delta2, &delta, sizeof(delta));
-    iknp.setup_send(delta2);
-    iknp.send_cot((block*)buffer.data(), n);
+    IKNP::send<model>(io, delta, buffer.data(), n);
     io.flush();
     for(int i = 0; i < n; ++i) {
       buffer[i] = buffer[i] & minusone;
     }
 
   } else {
-    iknp.setup_recv();
-    iknp.recv_cot((block*)buffer.data(), choices, n);
+    IKNP::recv<model>(io, buffer.data(), choices, n);
     std::bitset<128> ch[2];
     ch[0] = 0;
     ch[1] = 1;

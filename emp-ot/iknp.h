@@ -1,253 +1,235 @@
 #ifndef EMP_IKNP_H__
 #define EMP_IKNP_H__
+
+
 #include "emp-ot/cot.h"
 #include "emp-ot/co.h"
+#include "emp-ot/role.h"
 
 namespace emp {
 
-/*
-* IKNP OT Extension
-* [REF] Implementation of "Extending oblivious transfers efficiently"
-* https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf
-*
-* [REF] With optimization of "More Efficient Oblivious Transfer and Extensions for Faster Secure Computation"
-* https://eprint.iacr.org/2013/552.pdf
-* [REF] With optimization of "Better Concrete Security for Half-Gates Garbling (in the Multi-Instance Setting)"
-* https://eprint.iacr.org/2019/1168.pdf
-*/
-template<typename T>
-class IKNP: public COT<T> {
-public:
-  using COT<T>::io;
-  using COT<T>::Delta;
+/**
+ * IKNP OT Extension
+ * [REF] Implementation of "Extending oblivious transfers efficiently"
+ * https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf
+ *
+ * [REF] With optimization of "More Efficient Oblivious Transfer and Extensions
+ * for Faster Secure Computation" https://eprint.iacr.org/2013/552.pdf
+ * [REF] With optimization of "Better Concrete Security for Half-Gates Garbling
+ * (in the Multi-Instance Setting)" https://eprint.iacr.org/2019/1168.pdf
+ **/
+namespace IKNP {
 
-  OTCO<T> * base_ot = nullptr;
-  bool setup = false, *extended_r = nullptr;
+static constexpr std::size_t block_size = 1024*2;
 
-  const static int block_size = 1024*2;
-  block local_out[block_size];
-  bool s[128], local_r[256];
-  PRG prg, G0[128], G1[128];
-  bool malicious = false;
-  block k0[128], k1[128]; 
-  IKNP(T * io, bool malicious = false): malicious(malicious) {
-    this->io = io;
-  }
-  ~IKNP() {
-    delete_array_null(extended_r);
-  }
 
-  void setup_send(const bool* in_s = nullptr, block * in_k0 = nullptr) {
-    setup = true;
-    if(in_s == nullptr)
-      prg.random_bool(s, 128);
-    else 
-      memcpy(s, in_s, 128);
+inline std::bitset<128> bool_to_bitset(const bool* bs) {
+  const block b = bool_to_block(bs);
+  std::bitset<128> out;
+  memcpy(&out, &b, sizeof(b));
+  return out;
+}
 
-    if(in_k0 != nullptr) {
-      memcpy(k0, in_k0, 128*sizeof(block));
-    } else {
-      this->base_ot = new OTCO<T>(io);
-      base_ot->recv(k0, s, 128);
-      delete base_ot;
-    }
-    for(int i = 0; i < 128; ++i)
-      G0[i].reseed(&k0[i]);
 
-    Delta = bool_to_block(s);
-  }
-
-  void setup_send(const block& delta) {
-    setup = true;
-    block_to_bool(s, delta);
-    this->base_ot = new OTCO<T>(io);
-    base_ot->recv(k0, s, 128);
-    delete base_ot;
-
-    for(int i = 0; i < 128; ++i)
-      G0[i].reseed(&k0[i]);
-
-    Delta = delta;
-  }
-
-  void setup_recv(block * in_k0 = nullptr, block * in_k1 =nullptr) {
-    setup = true;
-    if(in_k0 !=nullptr) {
-      memcpy(k0, in_k0, 128*sizeof(block));
-      memcpy(k1, in_k1, 128*sizeof(block));
-    } else {
-      this->base_ot = new OTCO<T>(io);
-      prg.random_block(k0, 128);
-      prg.random_block(k1, 128);
-      base_ot->send(k0, k1, 128);
-      delete base_ot;
-    }
-    for(int i = 0; i < 128; ++i) {
-      G0[i].reseed(&k0[i]);
-      G1[i].reseed(&k1[i]);
-    }
-  }
-  void send_pre(block * out, int length) {
-    if(not setup)
-      setup_send();
-    int j = 0;
-    for (; j < length/block_size; ++j)
-      send_pre_block(out + j*block_size, block_size);
-    int remain = length % block_size;
-    if (remain > 0) {
-      send_pre_block(local_out, remain);
-      memcpy(out+j*block_size, local_out, sizeof(block)*remain);
-    }
-    if(malicious)
-      send_pre_block(local_out, 256);
-  }
-
-  void send_pre_block(block * out, int len) {
-    block t[block_size];
-    block tmp[block_size];
-    int local_block_size = (len+127)/128*128;
-    io->recv_block(tmp, local_block_size);
-    for(int i = 0; i < 128; ++i) {
+template <Model model>
+void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std::size_t n) {
+  PRG prg;
+  PRG G0[128];
+  PRG G1[128];
+  bool s[128];
+  const auto send_block = [&](std::bitset<128>* data, std::size_t len) {
+    std::bitset<128> t[block_size];
+    std::bitset<128> tmp[block_size];
+    std::size_t local_block_size = (len+127)/128*128;
+    io.recv_block((block*)tmp, local_block_size);
+    for(std::size_t i = 0; i < 128; ++i) {
       G0[i].random_data(t+(i*block_size/128), local_block_size/8);
-      if (s[i])
-        xorBlocks_arr(t+(i*block_size/128), t+(i*block_size/128), tmp+(i*local_block_size/128), local_block_size/128);
+      if (s[i]) {
+        xorBlocks_arr(
+            (block*)t+(i*block_size/128),
+            (block*)t+(i*block_size/128),
+            (block*)tmp+(i*local_block_size/128), local_block_size/128);
+      }
     }
-    sse_trans((uint8_t *)(out), (uint8_t*)t, 128, block_size);
+    sse_trans((uint8_t *)(data), (uint8_t*)t, 128, block_size);
+  };
+
+  std::bitset<128> k0[128];
+  std::bitset<128> local_out[block_size];
+
+  block delta2;
+  memcpy(&delta2, &delta, sizeof(delta));
+  block_to_bool(s, delta2);
+  OTCO<NetIO>(&io).recv((block*)k0, s, 128);
+
+  for(std::size_t i = 0; i < 128; ++i) {
+    G0[i].reseed((const block*)&k0[i]);
   }
 
-  void recv_pre(block * out, const bool* r, int length) {
-    if(not setup)
-      setup_recv();
-
-    block *block_r = new block[(length+127)/128];
-    for(int i = 0; i < (length+127)/128; ++i)
-      block_r[i] = bool_to_block(r+i*128);
-
-    int j = 0;
-    for (; j < length/block_size; ++j)
-      recv_pre_block(out+j*block_size, block_r + (j*block_size/128), block_size);
-    int remain = length % block_size;
-    if (remain > 0) {
-      recv_pre_block(local_out, block_r + (j*block_size/128), remain);
-      memcpy(out+j*block_size, local_out, sizeof(block)*remain);
-    }
-    if(malicious) {
-      block local_r_block[2]; 
-      prg.random_bool(local_r, 256);
-      local_r_block[0] = bool_to_block(local_r);
-      local_r_block[1] = bool_to_block(local_r + 128);
-      recv_pre_block(local_out, local_r_block, 256);
-    }
-    delete[] block_r;
-  }
-  void recv_pre_block(block * out, block * r, int len) {
-    block t[block_size];
-    block tmp[block_size];
-    int local_block_size = (len+127)/128 * 128;
-    for(int i = 0; i < 128; ++i) {
-      G0[i].random_data(t+(i*block_size/128), local_block_size/8);
-      G1[i].random_data(tmp, local_block_size/8);
-      xorBlocks_arr(tmp, t+(i*block_size/128), tmp, local_block_size/128);
-      xorBlocks_arr(tmp, r, tmp, local_block_size/128);
-      io->send_data(tmp, local_block_size/8);
-    }
-
-    sse_trans((uint8_t *)(out), (uint8_t*)t, 128, block_size);
+  std::size_t j = 0;
+  for (; j < n/block_size; ++j)
+    send_block(data + j*block_size, block_size);
+  std::size_t remain = n % block_size;
+  if (remain > 0) {
+    send_block(local_out, remain);
+    memcpy(data+j*block_size, local_out, sizeof(std::bitset<128>)*remain);
   }
 
-  void send_cot(block * data, int length) override{
-    send_pre(data, length);
+  if constexpr (model == Model::Malicious) {
+    // [REF] Implementation of "Actively Secure OT Extension with Optimal
+    // Overhead" https://eprint.iacr.org/2015/546.pdf
 
-    if(malicious)
-      if(!send_check(data, length))
-        error("OT Extension check failed");
-  }
-  void recv_cot(block* data, const bool * b, int length) override {
-    recv_pre(data, b, length);
-    if(malicious)
-      recv_check(data, b, length);
-  }
 
-  /*
-   *
-   * [REF] Implementation of "Actively Secure OT Extension with Optimal Overhead"
-   * https://eprint.iacr.org/2015/546.pdf
-   */
-  bool send_check(block * out, int length) {
-    block seed2, x, t[2], q[2], tmp[2];
-    block chi[block_size];
-    q[0] = q[1] = makeBlock(0, 0);
-    io->recv_block(&seed2, 1);
-    io->flush();
+    send_block(local_out, 256);
 
-    for(int i = 0; i < length/block_size; ++i) {
-      uni_hash_coeff_gen<block_size>(chi, seed2);
-      vector_inn_prdt_sum_no_red<block_size>(tmp, chi, out+i*block_size);
+    block seed2;
+    std::bitset<128> x, t[2], q[2], tmp[2];
+    std::bitset<128> chi[block_size];
+    q[0] = 0;
+    q[1] = 0;
+    io.recv_block(&seed2, 1);
+    io.flush();
+
+    for(std::size_t i = 0; i < n/block_size; ++i) {
+      uni_hash_coeff_gen<block_size>((block*)chi, seed2);
+      vector_inn_prdt_sum_no_red<block_size>((block*)tmp, (block*)chi, (block*)data+i*block_size);
       q[0] = q[0] ^ tmp[0];
       q[1] = q[1] ^ tmp[1];
     }
-    int remain = length % block_size;
+    std::size_t remain = n % block_size;
     if(remain != 0) {
-      uni_hash_coeff_gen<block_size>(chi, seed2);
-      vector_inn_prdt_sum_no_red(tmp, chi, out + length - remain, remain);
+      uni_hash_coeff_gen<block_size>((block*)chi, seed2);
+      vector_inn_prdt_sum_no_red((block*)tmp, (block*)chi, (block*)data + n - remain, remain);
       q[0] = q[0] ^ tmp[0];
       q[1] = q[1] ^ tmp[1];
     }
     {
-      uni_hash_coeff_gen<256>(chi, seed2);
-      vector_inn_prdt_sum_no_red<256>(tmp, chi, local_out);
+      uni_hash_coeff_gen<256>((block*)chi, seed2);
+      vector_inn_prdt_sum_no_red<256>((block*)tmp, (block*)chi, (block*)local_out);
       q[0] = q[0] ^ tmp[0];
       q[1] = q[1] ^ tmp[1];
     }
 
-    io->recv_block(&x, 1);
-    io->recv_block(t, 2);
-    mul128(x, Delta, tmp, tmp+1);
+    io.recv_block((block*)&x, 1);
+    io.recv_block((block*)t, 2);
+
+
+    block x2, delta2;
+    memcpy(&x2, &x, sizeof(x));
+    memcpy(&delta2, &delta, sizeof(delta));
+
+    mul128(x2, delta2, (block*)tmp, (block*)tmp+1);
     q[0] = q[0] ^ tmp[0];
     q[1] = q[1] ^ tmp[1];
 
-    return cmpBlock(q, t, 2);	
+    if (q[0] != t[0] || q[1] != t[1]) {
+      error("OT Extension check failed");
+    }
   }
-  void recv_check(block * out, const bool* r, int length) {
-    block select[2] = {zero_block, all_one_block};
-    block seed2, x = makeBlock(0,0), t[2], tmp[2];
-    prg.random_block(&seed2,1);
-    io->send_block(&seed2, 1);
-    io->flush();
-    block chi[block_size];
-    t[0] = t[1] = makeBlock(0, 0);
+}
 
-    for(int i = 0; i < length/block_size; ++i) {
-      uni_hash_coeff_gen<block_size>(chi, seed2);
-      vector_inn_prdt_sum_no_red<block_size>(tmp, chi, out+i*block_size);
+template <Model model>
+void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
+  PRG prg, G0[128], G1[128];
+  const auto recv_pre_block = [&](std::bitset<128>* data, std::bitset<128>* r, std::size_t len) {
+    std::bitset<128> t[block_size];
+    std::bitset<128> tmp[block_size];
+    std::size_t local_block_size = (len+127)/128 * 128;
+    for(std::size_t i = 0; i < 128; ++i) {
+      G0[i].random_data(t+(i*block_size/128), local_block_size/8);
+      G1[i].random_data(tmp, local_block_size/8);
+      xorBlocks_arr((block*)tmp, (block*)t+(i*block_size/128), (block*)tmp, local_block_size/128);
+      xorBlocks_arr((block*)tmp, (block*)r, (block*)tmp, local_block_size/128);
+      io.send_data((block*)tmp, local_block_size/8);
+    }
+
+    sse_trans((uint8_t *)(data), (uint8_t*)t, 128, block_size);
+  };
+
+  std::bitset<128> k0[128], k1[128];
+  std::bitset<128> local_out[block_size];
+
+  prg.random_block((block*)k0, 128);
+  prg.random_block((block*)k1, 128);
+  OTCO<NetIO>(&io).send((block*)k0, (block*)k1, 128);
+
+  for (std::size_t i = 0; i < 128; ++i) {
+    G0[i].reseed((block*)&k0[i]);
+    G1[i].reseed((block*)&k1[i]);
+  }
+
+  std::vector<std::bitset<128>> block_r ((n+127)/128);
+  for(std::size_t i = 0; i < (n+127)/128; ++i) {
+    block_r[i] = bool_to_bitset(r+i*128);
+  }
+
+  std::size_t j = 0;
+  for (; j < n/block_size; ++j) {
+    recv_pre_block(data+j*block_size, block_r.data() + (j*block_size/128), block_size);
+  }
+  std::size_t remain = n % block_size;
+  if (remain > 0) {
+    recv_pre_block(local_out, block_r.data() + (j*block_size/128), remain);
+    memcpy(data+j*block_size, local_out, sizeof(std::bitset<128>)*remain);
+  }
+
+
+  if (model == Model::Malicious) {
+    bool local_r[256];
+    std::bitset<128> local_r_block[2];
+    prg.random_bool(local_r, 256);
+    local_r_block[0] = bool_to_bitset(local_r);
+    local_r_block[1] = bool_to_bitset(local_r + 128);
+    recv_pre_block(local_out, local_r_block, 256);
+
+
+    std::bitset<128> select[2];
+    select[0] = std::bitset<128> { 0 };
+    select[1] = std::bitset<128> { 0 }.flip();
+
+    block seed2;
+    std::bitset<128> x = 0;
+    std::bitset<128> t[2], tmp[2];
+    prg.random_block(&seed2,1);
+    io.send_block(&seed2, 1);
+    io.flush();
+    std::bitset<128> chi[block_size];
+    t[0] = 0;
+    t[1] = 0;
+
+    for(std::size_t i = 0; i < n/block_size; ++i) {
+      uni_hash_coeff_gen<block_size>((block*)chi, seed2);
+      vector_inn_prdt_sum_no_red<block_size>((block*)tmp, (block*)chi, (block*)data+i*block_size);
       t[0] = t[0] ^ tmp[0];
       t[1] = t[1] ^ tmp[1];
-      for(int j = 0; j < block_size; ++j) 
+      for(std::size_t j = 0; j < block_size; ++j) 
         x = x ^ (chi[j] & select[r[i*block_size+j]]);
     }
-    int remain = length % block_size;
+    std::size_t remain = n % block_size;
     if(remain != 0) {
-      uni_hash_coeff_gen<block_size>(chi, seed2);
-      vector_inn_prdt_sum_no_red(tmp, chi, out+length - remain, remain);
+      uni_hash_coeff_gen<block_size>((block*)chi, seed2);
+      vector_inn_prdt_sum_no_red((block*)tmp, (block*)chi, (block*)data+n - remain, remain);
       t[0] = t[0] ^ tmp[0];
       t[1] = t[1] ^ tmp[1];
-      for(int j = 0; j < remain; ++j)
-        x = x ^ (chi[j] & select[r[length - remain + j]]);
+      for(std::size_t j = 0; j < remain; ++j)
+        x = x ^ (chi[j] & select[r[n - remain + j]]);
     }
 
     {
-      uni_hash_coeff_gen<256>(chi, seed2);
-      vector_inn_prdt_sum_no_red<256>(tmp, chi, local_out);
+      uni_hash_coeff_gen<256>((block*)chi, seed2);
+      vector_inn_prdt_sum_no_red<256>((block*)tmp, (block*)chi, (block*)local_out);
       t[0] = t[0] ^ tmp[0];
       t[1] = t[1] ^ tmp[1];
-      for(int j = 0; j < 256; ++j)
+      for(std::size_t j = 0; j < 256; ++j)
         x = x ^ (chi[j] & select[local_r[j]]);
     }
 
-    io->send_block(&x, 1);
-    io->send_block(t, 2);
+    io.send_block((block*)&x, 1);
+    io.send_block((block*)t, 2);
   }
-};
+}
 
-}//namespace
+}
+
+}
 #endif
