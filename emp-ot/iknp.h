@@ -6,6 +6,8 @@
 #include "emp-ot/co.h"
 #include "emp-ot/role.h"
 
+#include "emp-ot/gtprg.h"
+
 namespace emp {
 
 /**
@@ -33,17 +35,17 @@ inline std::bitset<128> bool_to_bitset(const bool* bs) {
 
 template <Model model>
 void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std::size_t n) {
-  PRG prg;
-  PRG G0[128];
-  PRG G1[128];
+  GT::PRG G[128];
   bool s[128];
   const auto send_block = [&](std::bitset<128>* data, std::size_t len) {
     std::bitset<128> t[block_size];
     std::bitset<128> tmp[block_size];
-    std::size_t local_block_size = (len+127)/128*128;
+    std::size_t local_block_size = (len+127)/128*128; // nearest higher multiple of 128
     io.recv_block((block*)tmp, local_block_size);
-    for(std::size_t i = 0; i < 128; ++i) {
-      G0[i].random_data(t+(i*block_size/128), local_block_size/8);
+    for (std::size_t i = 0; i < 128; ++i) {
+      for (std::size_t j = 0; j < local_block_size/128; ++j) {
+        t[(i*block_size/128) + j] = G[i]();
+      }
       if (s[i]) {
         xorBlocks_arr(
             (block*)t+(i*block_size/128),
@@ -62,13 +64,12 @@ void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std
   block_to_bool(s, delta2);
   OTCO<NetIO>(&io).recv((block*)k0, s, 128);
 
-  for(std::size_t i = 0; i < 128; ++i) {
-    G0[i].reseed((const block*)&k0[i]);
-  }
+  for(std::size_t i = 0; i < 128; ++i) { G[i] = { k0[i] }; }
 
   std::size_t j = 0;
-  for (; j < n/block_size; ++j)
+  for (; j < n/block_size; ++j) {
     send_block(data + j*block_size, block_size);
+  }
   std::size_t remain = n % block_size;
   if (remain > 0) {
     send_block(local_out, remain);
@@ -130,7 +131,8 @@ void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std
 
 template <Model model>
 void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
-  PRG prg, G0[128], G1[128];
+  GT::PRG prg;
+  PRG G0[128], G1[128];
   const auto recv_pre_block = [&](std::bitset<128>* data, std::bitset<128>* r, std::size_t len) {
     std::bitset<128> t[block_size];
     std::bitset<128> tmp[block_size];
@@ -149,8 +151,10 @@ void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
   std::bitset<128> k0[128], k1[128];
   std::bitset<128> local_out[block_size];
 
-  prg.random_block((block*)k0, 128);
-  prg.random_block((block*)k1, 128);
+  for (std::size_t i = 0; i < 128; ++i) {
+    k0[i] = prg();
+    k1[i] = prg();
+  }
   OTCO<NetIO>(&io).send((block*)k0, (block*)k1, 128);
 
   for (std::size_t i = 0; i < 128; ++i) {
@@ -187,41 +191,44 @@ void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
     select[0] = std::bitset<128> { 0 };
     select[1] = std::bitset<128> { 0 }.flip();
 
-    block seed2;
     std::bitset<128> x = 0;
     std::bitset<128> t[2], tmp[2];
-    prg.random_block(&seed2,1);
-    io.send_block(&seed2, 1);
+    const auto seed2 = prg();
+    io.send_block((block*)&seed2, 1);
     io.flush();
     std::bitset<128> chi[block_size];
     t[0] = 0;
     t[1] = 0;
 
-    for(std::size_t i = 0; i < n/block_size; ++i) {
-      uni_hash_coeff_gen<block_size>((block*)chi, seed2);
+    block seed2_;
+    memcpy(&seed2_, &seed2, sizeof(seed2));
+
+    for (std::size_t i = 0; i < n/block_size; ++i) {
+      uni_hash_coeff_gen<block_size>((block*)chi, seed2_);
       vector_inn_prdt_sum_no_red<block_size>((block*)tmp, (block*)chi, (block*)data+i*block_size);
-      t[0] = t[0] ^ tmp[0];
-      t[1] = t[1] ^ tmp[1];
+      t[0] ^= tmp[0];
+      t[1] ^= tmp[1];
       for(std::size_t j = 0; j < block_size; ++j) 
-        x = x ^ (chi[j] & select[r[i*block_size+j]]);
-    }
-    std::size_t remain = n % block_size;
-    if(remain != 0) {
-      uni_hash_coeff_gen<block_size>((block*)chi, seed2);
-      vector_inn_prdt_sum_no_red((block*)tmp, (block*)chi, (block*)data+n - remain, remain);
-      t[0] = t[0] ^ tmp[0];
-      t[1] = t[1] ^ tmp[1];
-      for(std::size_t j = 0; j < remain; ++j)
-        x = x ^ (chi[j] & select[r[n - remain + j]]);
+        x ^= (chi[j] & select[r[i*block_size+j]]);
     }
 
-    {
-      uni_hash_coeff_gen<256>((block*)chi, seed2);
-      vector_inn_prdt_sum_no_red<256>((block*)tmp, (block*)chi, (block*)local_out);
-      t[0] = t[0] ^ tmp[0];
-      t[1] = t[1] ^ tmp[1];
-      for(std::size_t j = 0; j < 256; ++j)
-        x = x ^ (chi[j] & select[local_r[j]]);
+    std::size_t remain = n % block_size;
+    if (remain != 0) {
+      uni_hash_coeff_gen<block_size>((block*)chi, seed2_);
+      vector_inn_prdt_sum_no_red((block*)tmp, (block*)chi, (block*)data+n - remain, remain);
+      t[0] ^= tmp[0];
+      t[1] ^= tmp[1];
+      for(std::size_t j = 0; j < remain; ++j) {
+        x ^= (chi[j] & select[r[n - remain + j]]);
+      }
+    }
+
+    uni_hash_coeff_gen<256>((block*)chi, seed2_);
+    vector_inn_prdt_sum_no_red<256>((block*)tmp, (block*)chi, (block*)local_out);
+    t[0] ^= tmp[0];
+    t[1] ^= tmp[1];
+    for(std::size_t j = 0; j < 256; ++j) {
+      x ^= (chi[j] & select[local_r[j]]);
     }
 
     io.send_block((block*)&x, 1);

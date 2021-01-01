@@ -3,7 +3,7 @@
 
 #include <emp-tool/emp-tool.h>
 #include "emp-ot/role.h"
-#include "emp-ot/ferret/gtprg.h"
+#include "emp-ot/gtprg.h"
 
 #include <unordered_set>
 #include <span>

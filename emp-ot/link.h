@@ -6,12 +6,9 @@
 #include <span>
 
 
-using byte = std::uint8_t;
-
-
 struct Link {
-  virtual void send(std::span<const byte>) = 0;
-  virtual void recv(std::span<byte>) = 0;
+  virtual void send(std::span<const std::byte>) = 0;
+  virtual void recv(std::span<std::byte>) = 0;
   virtual void flush() = 0;
 };
 
