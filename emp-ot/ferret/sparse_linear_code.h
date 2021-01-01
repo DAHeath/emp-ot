@@ -1,6 +1,7 @@
 #ifndef EMP_LPN_F2K_H__
 #define EMP_LPN_F2K_H__
 
+
 #include "emp-tool/emp-tool.h"
 #include "emp-ot/ferret/role.h"
 
@@ -9,7 +10,7 @@ using namespace emp;
 
 // Implementation of local linear code on F_2^k
 // Performance highly dependent on the CPU cache size
-template<Role role, int d = 10>
+template <Role role, int d = 10>
 void sparse_linear_code(
     const MpDesc& desc, const std::bitset<128>& seed, int threads,
     std::span<std::bitset<128>> nn,

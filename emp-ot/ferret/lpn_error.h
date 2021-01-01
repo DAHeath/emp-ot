@@ -2,12 +2,86 @@
 #define LPN_ERROR_H__
 
 #include <emp-tool/emp-tool.h>
-#include <set>
-#include <unordered_set>
 #include "emp-ot/ferret/role.h"
-#include "emp-ot/ferret/dpf.h"
+#include "emp-ot/ferret/gtprg.h"
+
+#include <unordered_set>
+#include <span>
 
 namespace emp {
+
+
+// distributed point function
+
+
+void ggm_expand(
+    const std::bitset<128>& parent,
+    std::bitset<128>& child0,
+    std::bitset<128>& child1) {
+  static GT::PRP f0(0);
+  static GT::PRP f1(1);
+  child0 = f0(parent);
+  child1 = f1(parent);
+
+  child0[0] = 0;
+  child1[0] = 0;
+}
+
+
+namespace DPF {
+
+std::vector<std::pair<std::bitset<128>, std::bitset<128>>>
+send(
+    std::size_t depth,
+    std::bitset<128> seed,
+    std::span<std::bitset<128>> tar) {
+  std::vector<std::pair<std::bitset<128>, std::bitset<128>>> out(depth);
+
+  tar[0] = seed;
+  for (std::size_t h = 0; h < depth-1; ++h) {
+    out[h].first = 0;
+    out[h].second = 0;
+    for (int i = (1 << h)-1; i >= 0; --i) {
+      ggm_expand(tar[i], tar[i*2], tar[i*2+1]);
+      out[h].first ^= tar[i*2];
+      out[h].second ^= tar[i*2+1];
+    }
+  }
+
+  return out;
+}
+
+
+void recv(
+    std::size_t depth,
+    std::span<const bool> choices,
+    std::span<const std::bitset<128>> stacks,
+    std::span<std::bitset<128>> tar) {
+  std::size_t ptr = 0;
+  for (std::size_t i = 0; i < depth-1; ++i) {
+    // reconstruct a layer of the ggm tree
+    tar[ptr] = tar[ptr+1] = 0;
+    std::size_t item_n = 1<< (i+1);
+
+    std::bitset<128> sum = 0;
+    for (std::size_t j = choices[i]; j < item_n; j+=2) {
+      sum ^= tar[j];
+    }
+
+    tar[ptr + choices[i]] = sum ^ stacks[i];
+    if (i+1 < depth-1) {
+      for (int j = item_n-1; j >= 0; --j) {
+        ggm_expand(tar[j], tar[j*2], tar[j*2+1]);
+      }
+    }
+    ptr = (ptr + !choices[i]) * 2;
+  }
+}
+
+}
+
+
+
 
 static constexpr std::size_t CONSIST_CHECK_COT_NUM = 128;
 
@@ -70,7 +144,7 @@ void lpn_error(
       }
     };
 
-    for (int i = 0; i < desc.t; ++i) {
+    for (std::size_t i = 0; i < desc.t; ++i) {
       choice_bits(positions[i] % leave_n, bs.get() + i*(tree_height-1));
     }
   }
@@ -88,7 +162,7 @@ void lpn_error(
       io->recv_data(bits.get(), n);
     } else {
       ccrh.Hn((block*)pre_data.data(), (block*)pre_cot_data.data(), 0, n);
-      for (int i = 0; i < n; ++i) {
+      for (std::size_t i = 0; i < n; ++i) {
         bits[i] = (bs[i] != pre_cot_data[i][0]);
       }
       io->send_data(bits.get(), n);
@@ -96,7 +170,7 @@ void lpn_error(
   }
   io->flush();
 
-  int width = (desc.t+threads)/(threads+1);
+  std::size_t width = (desc.t+threads)/(threads+1);
   std::vector<std::bitset<128>> pad(2 * desc.t * desc.bin_sz);
   std::vector<std::bitset<128>> secret_sums_f2(desc.t);
 
@@ -122,14 +196,14 @@ void lpn_error(
         std::size_t k = j*desc.bin_sz;
 
         if constexpr (role == Role::Sender) {
-          const auto messages = dpf_send(tree_height, prg(), subvector);
+          const auto messages = DPF::send(tree_height, prg(), subvector);
 
           secret_sums_f2[j] = delta;
           for (std::size_t i = 0; i < leave_n; ++i) {
             secret_sums_f2[j] ^= subvector[i];
           }
 
-          for (int i = 0; i < desc.bin_sz; ++i) {
+          for (std::size_t i = 0; i < desc.bin_sz; ++i) {
             pad[2*(j*desc.bin_sz + i)] = messages[i].first ^ pre_data[k+i + bits[k+i]*n];
             pad[2*(j*desc.bin_sz + i)+1] = messages[i].second ^ pre_data[k+i + (!bits[k+i])*n];
           }
@@ -148,17 +222,17 @@ void lpn_error(
           std::vector<std::bitset<128>> m(tree_height-1);
 
           auto b = bs.get() + j*(tree_height-1);
-          int k = j*desc.bin_sz;
+          std::size_t k = j*desc.bin_sz;
 
-          for (int i = 0; i < desc.bin_sz; ++i) {
+          for (std::size_t i = 0; i < desc.bin_sz; ++i) {
             m[i] = pre_data[k+i] ^ pad[2*(j*desc.bin_sz + i) + b[i]];
           }
 
-          dpf_recv(tree_height, std::span<const bool> { b, tree_height-1 }, m, subvector);
+          DPF::recv(tree_height, std::span<const bool> { b, tree_height-1 }, m, subvector);
 
           std::size_t choice_pos = positions[j]%leave_n;
           std::bitset<128> sum = 0;
-          for (int i = 0; i < leave_n; ++i) { sum ^= subvector[i]; }
+          for (std::size_t i = 0; i < leave_n; ++i) { sum ^= subvector[i]; }
           subvector[choice_pos] ^= sum ^ secret_sums_f2[j];
 
           if (model == Model::Malicious) {
@@ -194,7 +268,7 @@ void lpn_error(
       vector_self_xor(&r1, (block*)consist_check_VW.data(), desc.t);
       bool x_prime[128];
       io->recv_data(x_prime, 128*sizeof(bool));
-      for(int i = 0; i < 128; ++i) {
+      for(std::size_t i = 0; i < 128; ++i) {
         if(x_prime[i])
           pre_cot_data[i] = pre_cot_data[i] ^ delta;
       }
@@ -213,8 +287,8 @@ void lpn_error(
       pos[0] = _mm_extract_epi64(r2, 0);
       pos[1] = _mm_extract_epi64(r2, 1);
       bool pre_cot_bool[128];
-      for (int i = 0; i < 2; ++i) {
-        for (int j = 0; j < 64; ++j) {
+      for (std::size_t i = 0; i < 2; ++i) {
+        for (std::size_t j = 0; j < 64; ++j) {
           pre_cot_bool[i*64+j] = ((pos[i] & 1) == 1) ^ pre_cot_data[i*64+j][0];
           pos[i] >>= 1;
         }
