@@ -3,7 +3,7 @@
 
 
 #include <emp-tool/emp-tool.h>
-#include "emp-ot/ot.h"
+#include "ot.h"
 namespace emp {
 
 template<typename IO>

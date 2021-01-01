@@ -2,8 +2,8 @@
 #define LPN_ERROR_H__
 
 #include <emp-tool/emp-tool.h>
-#include "emp-ot/role.h"
-#include "emp-ot/gtprg.h"
+#include "role.h"
+#include "gtprg.h"
 
 #include <unordered_set>
 #include <span>

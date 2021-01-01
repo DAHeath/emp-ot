@@ -2,11 +2,13 @@
 #define EMP_IKNP_H__
 
 
-#include "emp-ot/cot.h"
-#include "emp-ot/co.h"
-#include "emp-ot/role.h"
+#include "cot.h"
+#include "co.h"
+#include "role.h"
 
-#include "emp-ot/gtprg.h"
+#include "gtprg.h"
+
+#include "base.h"
 
 namespace emp {
 
@@ -56,13 +58,10 @@ void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std
     sse_trans((uint8_t *)(data), (uint8_t*)t, 128, block_size);
   };
 
-  std::bitset<128> k0[128];
   std::bitset<128> local_out[block_size];
 
-  block delta2;
-  memcpy(&delta2, &delta, sizeof(delta));
-  block_to_bool(s, delta2);
-  OTCO<NetIO>(&io).recv((block*)k0, s, 128);
+  NetLink link { &io };
+  const auto k0 = BaseOT::recv(link, delta);
 
   for(std::size_t i = 0; i < 128; ++i) { G[i] = { k0[i] }; }
 
@@ -148,14 +147,17 @@ void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
     sse_trans((uint8_t *)(data), (uint8_t*)t, 128, block_size);
   };
 
-  std::bitset<128> k0[128], k1[128];
+  /* std::bitset<128> k0[128], k1[128]; */
   std::bitset<128> local_out[block_size];
 
-  for (std::size_t i = 0; i < 128; ++i) {
-    k0[i] = prg();
-    k1[i] = prg();
-  }
-  OTCO<NetIO>(&io).send((block*)k0, (block*)k1, 128);
+  /* for (std::size_t i = 0; i < 128; ++i) { */
+  /*   k0[i] = prg(); */
+  /*   k1[i] = prg(); */
+  /* } */
+
+  NetLink link { &io };
+  const auto [k0, k1] = BaseOT::send(link);
+  /* OTCO<NetIO>(&io).send((block*)k0, (block*)k1, 128); */
 
   for (std::size_t i = 0; i < 128; ++i) {
     G0[i].reseed((block*)&k0[i]);

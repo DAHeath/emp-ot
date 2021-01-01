@@ -1,8 +1,11 @@
 #ifndef OT_POINT_H__
 #define OT_POINT_H__
 
+#include "link.h"
+
 #include <openssl/bn.h>
 #include <openssl/ec.h>
+
 #include <memory>
 #include <vector>
 #include <bitset>
@@ -36,15 +39,15 @@ struct Point {
   ~Point();
 
   [[nodiscard]] size_t size() const;
-  [[nodiscard]] static Point fromBin(Group&, const char*, size_t);
+  [[nodiscard]] static Point fromBin(Group&, std::span<const std::byte>);
   void toBin(char*, size_t) const;
 
   [[nodiscard]] Point operator+(const Point&) const;
   [[nodiscard]] Point operator*(const BigInt&) const;
   Point operator~() const;
 
-  void write(std::ostream&) const;
-  [[nodiscard]] static Point read(Group&, std::istream&);
+  void write(Link&) const;
+  [[nodiscard]] static Point read(Group&, Link&);
   std::bitset<128> hash(uint64_t) const;
 
   EC_POINT *point = nullptr;

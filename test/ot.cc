@@ -1,5 +1,5 @@
 #include <emp-tool/emp-tool.h>
-#include "emp-ot/ferret.h"
+#include "ferret.h"
 #include <iostream>
 
 

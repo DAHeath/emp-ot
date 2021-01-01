@@ -1,5 +1,5 @@
-#include "Point.h"
-#include "Hash.h"
+#include "point.h"
+#include "gthash.h"
 #include <openssl/obj_mac.h>
 #include <iostream>
 
@@ -117,13 +117,19 @@ size_t Point::size() const {
   return ret;
 }
 
-Point Point::fromBin(Group& g, const char* buf, size_t n) {
+Point Point::fromBin(Group& g, std::span<const std::byte> buf) {
   Point out;
   out.group = &g;
   out.point = EC_POINT_new(&*g.ec_group);
 
-  int ret = EC_POINT_oct2point(&*g.ec_group, out.point, (unsigned char*)buf, n, &*g.bn_ctx);
-  if(ret == 0) {
+  int ret = EC_POINT_oct2point(
+      &*g.ec_group,
+      out.point,
+      (unsigned char*)buf.data(),
+      buf.size(),
+      &*g.bn_ctx);
+
+  if (ret == 0) {
     error("ECC FROM_BIN");
   }
   return out;
@@ -157,11 +163,11 @@ Point Point::operator~() const {
 }
 
 
-void Point::write(std::ostream& channel) const {
+void Point::write(Link& link) const {
   const size_t len = size();
-  channel.write((const char*)&len, 4);
+  link.send((const std::byte*)&len, 4);
 
-  std::vector<char> scratch(len);
+  std::vector<std::byte> scratch(len);
   int ret = EC_POINT_point2oct(
       &*group->ec_group,
       point,
@@ -172,16 +178,16 @@ void Point::write(std::ostream& channel) const {
   if (ret == 0) {
     error("ECC TO_BIN");
   }
-  channel.write(scratch.data(), len);
+  link.send(scratch.data(), len);
 }
 
 
-Point Point::read(Group& g, std::istream& channel) {
+Point Point::read(Group& g, Link& link) {
   size_t len = 0;
-  channel.read((char*)&len, 4);
-  std::vector<char> scratch(len);
-  channel.read(scratch.data(), len);
-  return Point::fromBin(g, scratch.data(), len);
+  link.recv((std::byte*)&len, 4);
+  std::vector<std::byte> scratch(len);
+  link.recv(scratch.data(), len);
+  return Point::fromBin(g, scratch);
 }
 
 std::bitset<128> Point::hash(uint64_t id) const {

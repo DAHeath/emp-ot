@@ -1,6 +1,6 @@
 #ifndef EMP_COT_H__
 #define EMP_COT_H__
-#include "emp-ot/ot.h"
+#include "ot.h"
 
 namespace emp {
 

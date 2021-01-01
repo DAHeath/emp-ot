@@ -3,7 +3,7 @@
 
 
 #include "emp-tool/emp-tool.h"
-#include "emp-ot/role.h"
+#include "role.h"
 
 using namespace emp;
 

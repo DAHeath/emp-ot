@@ -1,12 +1,12 @@
 #ifndef EMP_FERRET_COT_H_
 #define EMP_FERRET_COT_H_
 
-#include "emp-ot/role.h"
-#include "emp-ot/lpn_error.h"
-#include "emp-ot/sparse_linear_code.h"
-#include "emp-ot/iknp.h"
+#include "role.h"
+#include "lpn_error.h"
+#include "sparse_linear_code.h"
+#include "iknp.h"
 
-#include "emp-ot/gtprg.h"
+#include "gtprg.h"
 
 #include <span>
 
