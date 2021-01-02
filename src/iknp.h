@@ -38,17 +38,23 @@ inline std::bitset<128> bool_to_bitset(const bool* bs) {
 template <Model model>
 void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std::size_t n) {
   GT::PRG G[128];
-  bool s[128];
+
+  NetLink link { &io };
+  const auto k0 = BaseOT::recv(link, delta);
+
+  for(std::size_t i = 0; i < 128; ++i) { G[i] = { k0[i] }; }
+
+
+  std::bitset<128> t[block_size];
+  std::bitset<128> tmp[block_size];
   const auto send_block = [&](std::bitset<128>* data, std::size_t len) {
-    std::bitset<128> t[block_size];
-    std::bitset<128> tmp[block_size];
     std::size_t local_block_size = (len+127)/128*128; // nearest higher multiple of 128
     io.recv_block((block*)tmp, local_block_size);
     for (std::size_t i = 0; i < 128; ++i) {
       for (std::size_t j = 0; j < local_block_size/128; ++j) {
         t[(i*block_size/128) + j] = G[i]();
       }
-      if (s[i]) {
+      if (delta[i]) {
         xorBlocks_arr(
             (block*)t+(i*block_size/128),
             (block*)t+(i*block_size/128),
@@ -58,18 +64,12 @@ void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std
     sse_trans((uint8_t *)(data), (uint8_t*)t, 128, block_size);
   };
 
-  std::bitset<128> local_out[block_size];
-
-  NetLink link { &io };
-  const auto k0 = BaseOT::recv(link, delta);
-
-  for(std::size_t i = 0; i < 128; ++i) { G[i] = { k0[i] }; }
-
   std::size_t j = 0;
   for (; j < n/block_size; ++j) {
     send_block(data + j*block_size, block_size);
   }
   std::size_t remain = n % block_size;
+  std::bitset<128> local_out[block_size];
   if (remain > 0) {
     send_block(local_out, remain);
     memcpy(data+j*block_size, local_out, sizeof(std::bitset<128>)*remain);
@@ -78,8 +78,6 @@ void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std
   if constexpr (model == Model::Malicious) {
     // [REF] Implementation of "Actively Secure OT Extension with Optimal
     // Overhead" https://eprint.iacr.org/2015/546.pdf
-
-
     send_block(local_out, 256);
 
     block seed2;
@@ -147,17 +145,8 @@ void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
     sse_trans((uint8_t *)(data), (uint8_t*)t, 128, block_size);
   };
 
-  /* std::bitset<128> k0[128], k1[128]; */
-  std::bitset<128> local_out[block_size];
-
-  /* for (std::size_t i = 0; i < 128; ++i) { */
-  /*   k0[i] = prg(); */
-  /*   k1[i] = prg(); */
-  /* } */
-
   NetLink link { &io };
   const auto [k0, k1] = BaseOT::send(link);
-  /* OTCO<NetIO>(&io).send((block*)k0, (block*)k1, 128); */
 
   for (std::size_t i = 0; i < 128; ++i) {
     G0[i].reseed((block*)&k0[i]);
@@ -165,7 +154,7 @@ void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
   }
 
   std::vector<std::bitset<128>> block_r ((n+127)/128);
-  for(std::size_t i = 0; i < (n+127)/128; ++i) {
+  for (std::size_t i = 0; i < (n+127)/128; ++i) {
     block_r[i] = bool_to_bitset(r+i*128);
   }
 
@@ -173,6 +162,8 @@ void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
   for (; j < n/block_size; ++j) {
     recv_pre_block(data+j*block_size, block_r.data() + (j*block_size/128), block_size);
   }
+
+  std::bitset<128> local_out[block_size];
   std::size_t remain = n % block_size;
   if (remain > 0) {
     recv_pre_block(local_out, block_r.data() + (j*block_size/128), remain);

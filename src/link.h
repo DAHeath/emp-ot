@@ -19,7 +19,7 @@ struct Link {
   }
 
   void recv(std::byte* bytes, std::size_t n) {
-    send(std::span<std::byte> { bytes, n });
+    recv(std::span<std::byte> { bytes, n });
   }
 };
 
@@ -30,11 +30,11 @@ public:
   NetLink(emp::NetIO* io) : io(io) { }
 
   void send(std::span<const std::byte> s) {
-    io->send_data_internal(s.data(), s.size());
+    io->send_data(s.data(), s.size());
   }
 
   void recv(std::span<std::byte> s) {
-    io->recv_data_internal(s.data(), s.size());
+    io->recv_data(s.data(), s.size());
   }
 
   void flush() {

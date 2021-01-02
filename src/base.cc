@@ -30,8 +30,7 @@ std::bitset<128*n> randomBits() {
   return randomBits<n>(prg);
 }
 
-std::pair<std::vector<std::bitset<128>>, std::vector<std::bitset<128>>>
-send(Link& link) {
+std::pair<std::vector<std::bitset<128>>, std::vector<std::bitset<128>>> send(Link& link) {
   constexpr std::size_t n = 128;
 
   Group G;
@@ -42,7 +41,7 @@ send(Link& link) {
 
   std::vector<Point> B(n);
   std::vector<Point> BA(n);
-  for(int i = 0; i < n; ++i) {
+  for (int i = 0; i < n; ++i) {
     B[i] = Point::read(G, link) * a;
     BA[i] = B[i] + AaInv;
   }
@@ -51,7 +50,7 @@ send(Link& link) {
   const auto k0 = randomBlock(prg, 128);
   const auto k1 = randomBlock(prg, 128);
 
-  for(int i = 0; i < n; ++i) {
+  for (std::size_t i = 0; i < n; ++i) {
     std::bitset<128> payload[2];
     payload[0] = k0[i] ^ B[i].hash(i);
     payload[1] = k1[i] ^ BA[i].hash(i);
@@ -62,26 +61,25 @@ send(Link& link) {
 }
 
 
-std::vector<std::bitset<128>>
-recv(Link& link, const std::bitset<128>& b) {
+std::vector<std::bitset<128>> recv(Link& link, const std::bitset<128>& b) {
   constexpr std::size_t n = 128;
 
   Group G;
   Point A = Point::read(G, link);
 
   std::vector<BigInt> bb(n);
-  for(int i = 0; i < n; ++i) {
+  for (std::size_t i = 0; i < n; ++i) {
     bb[i] = G.randBigInt();
     const auto B = b[i] ? (G * bb[i]) + A : G * bb[i];
     B.write(link);
   }
   link.flush();
 
+  std::bitset<128> buf[2];
   std::vector<std::bitset<128>> data(n);
-  for(int i = 0; i < n; ++i) {
-    std::bitset<128> res[2];
-    link.recv(std::span<std::byte> { (std::byte*)res, 2*sizeof(std::bitset<128>) });
-    data[i] = (A * bb[i]).hash(i) ^ (b[i] ? res[1] : res[0]);
+  for (std::size_t i = 0; i < n; ++i) {
+    link.recv((std::byte*)buf, 2*sizeof(std::bitset<128>));
+    data[i] = (A * bb[i]).hash(i) ^ (b[i] ? buf[1] : buf[0]);
   }
   return data;
 }

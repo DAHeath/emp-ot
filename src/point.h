@@ -40,7 +40,7 @@ struct Point {
 
   [[nodiscard]] size_t size() const;
   [[nodiscard]] static Point fromBin(Group&, std::span<const std::byte>);
-  void toBin(char*, size_t) const;
+  void toBin(std::span<std::byte>) const;
 
   [[nodiscard]] Point operator+(const Point&) const;
   [[nodiscard]] Point operator*(const BigInt&) const;
