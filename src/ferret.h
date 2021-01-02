@@ -46,14 +46,16 @@ std::vector<std::bitset<128>> base_cot(
   if constexpr (role == Role::Sender) {
     block delta2;
     memcpy(&delta2, &delta, sizeof(delta));
-    IKNP::send<model>(io, delta, buffer.data(), n);
+    NetLink link { &io };
+    IKNP::send<model>(link, delta, buffer);
     io.flush();
     for(int i = 0; i < n; ++i) {
       buffer[i] = buffer[i] & minusone;
     }
 
   } else {
-    IKNP::recv<model>(io, buffer.data(), choices, n);
+    NetLink link { &io };
+    IKNP::recv<model>(link, buffer.data(), choices, n);
     std::bitset<128> ch[2];
     ch[0] = 0;
     ch[1] = 1;
@@ -137,7 +139,8 @@ struct FerretCOT {
       }
       io.flush();
     }
-    lpn_error<model, role, threads>(desc, &io, prg, delta, tar.data(), src);
+    NetLink link { &io };
+    lpn_error<model, role, threads>(desc, link, prg, delta, tar.data(), src);
     sparse_linear_code<role>(desc, seed, threads, tar, src.subspan(CONSIST_CHECK_COT_NUM));
   }
 };

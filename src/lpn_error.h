@@ -3,6 +3,7 @@
 
 #include <emp-tool/emp-tool.h>
 #include "role.h"
+#include "link.h"
 #include "gtprg.h"
 
 #include <unordered_set>
@@ -121,7 +122,7 @@ std::vector<std::uint32_t> range_subset(GT::PRG& prg, std::uint32_t cap, std::si
 template<Model model, Role role, std::size_t threads>
 void lpn_error(
     const MpDesc& desc,
-    NetIO* io,
+    Link& link,
     GT::PRG& prg,
     std::bitset<128> delta,
     std::bitset<128> * sparse_vector,
@@ -159,24 +160,24 @@ void lpn_error(
       ccrh.Hn((block*)pre_data.data(), (block*)pre_cot_data.data(), 0, n, (block*)pre_data.data()+n);
       xorBlocks_arr((block*)pre_data.data()+n, (block*)pre_cot_data.data(), *(block*)&delta, n);
       ccrh.Hn((block*)pre_data.data()+n, (block*)pre_data.data()+n, 0, n);
-      io->recv_data(bits.get(), n);
+      link.recv((std::byte*)bits.get(), n);
     } else {
       ccrh.Hn((block*)pre_data.data(), (block*)pre_cot_data.data(), 0, n);
       for (std::size_t i = 0; i < n; ++i) {
         bits[i] = (bs[i] != pre_cot_data[i][0]);
       }
-      io->send_data(bits.get(), n);
+      link.send((const std::byte*)bits.get(), n);
     }
   }
-  io->flush();
+  link.flush();
 
   std::size_t width = (desc.t+threads)/(threads+1);
   std::vector<std::bitset<128>> pad(2 * desc.t * desc.bin_sz);
   std::vector<std::bitset<128>> secret_sums_f2(desc.t);
 
   if (role == Role::Receiver) {
-    io->recv_block((block*)pad.data(), pad.size());
-    io->recv_block((block*)secret_sums_f2.data(), secret_sums_f2.size());
+    link.recv((std::byte*)pad.data(), 16*pad.size());
+    link.recv((std::byte*)secret_sums_f2.data(), 16*secret_sums_f2.size());
   }
 
   std::vector<std::bitset<128>> consist_check_chi_alpha;
@@ -255,9 +256,9 @@ void lpn_error(
   for (auto& th : ths) { th.join(); }
 
   if constexpr (role == Role::Sender) {
-    io->send_block((block*)pad.data(), pad.size());
-    io->send_block((block*)secret_sums_f2.data(), secret_sums_f2.size());
-    io->flush();
+    link.send((const std::byte*)pad.data(), 16*pad.size());
+    link.send((const std::byte*)secret_sums_f2.data(), 16*secret_sums_f2.size());
+    link.flush();
   }
 
   if (model == Model::Malicious) {
@@ -267,7 +268,7 @@ void lpn_error(
       block r1, r2;
       vector_self_xor(&r1, (block*)consist_check_VW.data(), desc.t);
       bool x_prime[128];
-      io->recv_data(x_prime, 128*sizeof(bool));
+      link.recv((std::byte*)x_prime, 128*sizeof(bool));
       for(std::size_t i = 0; i < 128; ++i) {
         if(x_prime[i])
           pre_cot_data[i] = pre_cot_data[i] ^ delta;
@@ -277,8 +278,8 @@ void lpn_error(
       block dig[2];
       Hash hash;
       hash.hash_once(dig, &r1, sizeof(block));
-      io->send_data(dig, 2*sizeof(block));
-      io->flush();
+      link.send((const std::byte*)dig, 2*sizeof(block));
+      link.flush();
     } else {
       block r1, r2, r3;
       vector_self_xor(&r1, (block*)consist_check_VW.data(), desc.t);
@@ -293,15 +294,15 @@ void lpn_error(
           pos[i] >>= 1;
         }
       }
-      io->send_data(pre_cot_bool, 128*sizeof(bool));
-      io->flush();
+      link.send((const std::byte*)pre_cot_bool, 128*sizeof(bool));
+      link.flush();
       pack.packing(&r3, (block*)pre_cot_data.data());
       r1 = r1 ^ r3;
       block dig[2];
       Hash hash;
       hash.hash_once(dig, &r1, sizeof(block));
       block recv[2];
-      io->recv_data(recv, 2*sizeof(block));
+      link.recv((std::byte*)recv, 2*sizeof(block));
       if (!cmpBlock(dig, recv, 2)) {
         std::cout << "SPCOT consistency check fails" << std::endl;
       }

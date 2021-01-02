@@ -36,10 +36,9 @@ inline std::bitset<128> bool_to_bitset(const bool* bs) {
 
 
 template <Model model>
-void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std::size_t n) {
+void send(Link& link, const std::bitset<128>& delta, std::span<std::bitset<128>> data) {
   GT::PRG G[128];
 
-  NetLink link { &io };
   const auto k0 = BaseOT::recv(link, delta);
 
   for(std::size_t i = 0; i < 128; ++i) { G[i] = { k0[i] }; }
@@ -47,9 +46,9 @@ void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std
 
   std::bitset<128> t[block_size];
   std::bitset<128> tmp[block_size];
-  const auto send_block = [&](std::bitset<128>* data, std::size_t len) {
-    std::size_t local_block_size = (len+127)/128*128; // nearest higher multiple of 128
-    io.recv_block((block*)tmp, local_block_size);
+  const auto send_block = [&](std::span<std::bitset<128>> data) {
+    std::size_t local_block_size = (data.size()+127)/128*128; // nearest higher multiple of 128
+    link.recv((std::byte*)tmp, local_block_size*16);
     for (std::size_t i = 0; i < 128; ++i) {
       for (std::size_t j = 0; j < local_block_size/128; ++j) {
         t[(i*block_size/128) + j] = G[i]();
@@ -61,43 +60,43 @@ void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std
             (block*)tmp+(i*local_block_size/128), local_block_size/128);
       }
     }
-    sse_trans((uint8_t *)(data), (uint8_t*)t, 128, block_size);
+    sse_trans((uint8_t *)(data.data()), (uint8_t*)t, 128, block_size);
   };
 
   std::size_t j = 0;
-  for (; j < n/block_size; ++j) {
-    send_block(data + j*block_size, block_size);
+  for (; j < data.size()/block_size; ++j) {
+    send_block(data.subspan(j*block_size, block_size));
   }
-  std::size_t remain = n % block_size;
+  std::size_t remain = data.size() % block_size;
   std::bitset<128> local_out[block_size];
   if (remain > 0) {
-    send_block(local_out, remain);
-    memcpy(data+j*block_size, local_out, sizeof(std::bitset<128>)*remain);
+    send_block(std::span { local_out, remain });
+    memcpy(data.data()+j*block_size, local_out, sizeof(std::bitset<128>)*remain);
   }
 
   if constexpr (model == Model::Malicious) {
     // [REF] Implementation of "Actively Secure OT Extension with Optimal
     // Overhead" https://eprint.iacr.org/2015/546.pdf
-    send_block(local_out, 256);
+    send_block(std::span { local_out, 256 });
 
     block seed2;
     std::bitset<128> x, t[2], q[2], tmp[2];
     std::bitset<128> chi[block_size];
     q[0] = 0;
     q[1] = 0;
-    io.recv_block(&seed2, 1);
-    io.flush();
+    link.recv((std::byte*)&seed2, 16);
+    link.flush();
 
-    for(std::size_t i = 0; i < n/block_size; ++i) {
+    for(std::size_t i = 0; i < data.size()/block_size; ++i) {
       uni_hash_coeff_gen<block_size>((block*)chi, seed2);
-      vector_inn_prdt_sum_no_red<block_size>((block*)tmp, (block*)chi, (block*)data+i*block_size);
+      vector_inn_prdt_sum_no_red<block_size>((block*)tmp, (block*)chi, (block*)data.data()+i*block_size);
       q[0] = q[0] ^ tmp[0];
       q[1] = q[1] ^ tmp[1];
     }
-    std::size_t remain = n % block_size;
+    std::size_t remain = data.size() % block_size;
     if(remain != 0) {
       uni_hash_coeff_gen<block_size>((block*)chi, seed2);
-      vector_inn_prdt_sum_no_red((block*)tmp, (block*)chi, (block*)data + n - remain, remain);
+      vector_inn_prdt_sum_no_red((block*)tmp, (block*)chi, (block*)data.data() + data.size() - remain, remain);
       q[0] = q[0] ^ tmp[0];
       q[1] = q[1] ^ tmp[1];
     }
@@ -108,8 +107,8 @@ void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std
       q[1] = q[1] ^ tmp[1];
     }
 
-    io.recv_block((block*)&x, 1);
-    io.recv_block((block*)t, 2);
+    link.recv((std::byte*)&x, 16);
+    link.recv((std::byte*)t, 32);
 
 
     block x2, delta2;
@@ -127,7 +126,7 @@ void send(NetIO& io, const std::bitset<128>& delta, std::bitset<128> * data, std
 }
 
 template <Model model>
-void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
+void recv(Link& link, std::bitset<128>* data, const bool * r, std::size_t n) {
   GT::PRG prg;
   PRG G0[128], G1[128];
   const auto recv_pre_block = [&](std::bitset<128>* data, std::bitset<128>* r, std::size_t len) {
@@ -139,13 +138,12 @@ void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
       G1[i].random_data(tmp, local_block_size/8);
       xorBlocks_arr((block*)tmp, (block*)t+(i*block_size/128), (block*)tmp, local_block_size/128);
       xorBlocks_arr((block*)tmp, (block*)r, (block*)tmp, local_block_size/128);
-      io.send_data((block*)tmp, local_block_size/8);
+      link.send((const std::byte*)tmp, local_block_size/8);
     }
 
     sse_trans((uint8_t *)(data), (uint8_t*)t, 128, block_size);
   };
 
-  NetLink link { &io };
   const auto [k0, k1] = BaseOT::send(link);
 
   for (std::size_t i = 0; i < 128; ++i) {
@@ -187,8 +185,8 @@ void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
     std::bitset<128> x = 0;
     std::bitset<128> t[2], tmp[2];
     const auto seed2 = prg();
-    io.send_block((block*)&seed2, 1);
-    io.flush();
+    link.send((const std::byte*)&seed2, 16);
+    link.flush();
     std::bitset<128> chi[block_size];
     t[0] = 0;
     t[1] = 0;
@@ -224,8 +222,8 @@ void recv(NetIO& io, std::bitset<128>* data, const bool * r, std::size_t n) {
       x ^= (chi[j] & select[local_r[j]]);
     }
 
-    io.send_block((block*)&x, 1);
-    io.send_block((block*)t, 2);
+    link.send((const std::byte*)&x, 16);
+    link.send((const std::byte*)t, 32);
   }
 }
 
