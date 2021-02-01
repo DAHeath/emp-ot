@@ -142,6 +142,24 @@ struct FerretCOT {
   }
 };
 
+
+
+
+template <Model model>
+std::vector<std::bitset<128>> ferret_recv(Link& link, std::size_t n) {
+  GT::PRG prg;
+  auto cot = FerretCOT<model, Role::Receiver, 1>::make(link, prg);
+  return cot.extend(link, prg, n);
+}
+
+template <Model model>
+std::vector<std::bitset<128>> ferret_send(Link& link, std::size_t n, std::bitset<128>& delta) {
+  GT::PRG prg;
+  auto cot = FerretCOT<model, Role::Sender, 1>::make(link, prg);
+  delta = cot.delta;
+  return cot.extend(link, prg, n);
+}
+
 }
 
 #endif
