@@ -15,7 +15,7 @@ namespace emp {
 // distributed point function
 
 
-void ggm_expand(
+inline void ggm_expand(
     const std::bitset<128>& parent,
     std::bitset<128>& child0,
     std::bitset<128>& child1) {
@@ -31,7 +31,7 @@ void ggm_expand(
 
 namespace DPF {
 
-std::vector<std::pair<std::bitset<128>, std::bitset<128>>>
+inline std::vector<std::pair<std::bitset<128>, std::bitset<128>>>
 send(
     std::size_t depth,
     std::bitset<128> seed,
@@ -53,7 +53,7 @@ send(
 }
 
 
-void recv(
+inline void recv(
     std::size_t depth,
     std::span<const bool> choices,
     std::span<const std::bitset<128>> stacks,
@@ -98,7 +98,7 @@ struct MpDesc {
 
 
 // Select a random size n subset of the range [0..cap)
-std::vector<std::uint32_t> range_subset(GT::PRG& prg, std::uint32_t cap, std::size_t n) {
+inline std::vector<std::uint32_t> range_subset(GT::PRG& prg, std::uint32_t cap, std::size_t n) {
   std::uint32_t xs[4];
   std::unordered_set<std::uint32_t> s;
   while (s.size() < n) {
