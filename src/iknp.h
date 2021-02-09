@@ -2,8 +2,6 @@
 #define EMP_IKNP_H__
 
 
-#include "cot.h"
-#include "co.h"
 #include "role.h"
 
 #include "gtprg.h"
