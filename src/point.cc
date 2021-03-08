@@ -1,7 +1,7 @@
 #include "point.h"
 #include "gthash.h"
 #include <openssl/obj_mac.h>
-#include <iostream>
+#include <cstdio>
 
 
 inline void error(const char * s, int line = 0, const char * file = nullptr) {
@@ -210,9 +210,7 @@ std::bitset<128> Point::hash(uint64_t id) const {
 
 
 Group::Group()
-  : ec_group (
-      EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1), // NIST P-256
-      EC_GROUP_free),
+  : ec_group (EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1), EC_GROUP_free),
     bn_ctx (BN_CTX_new(), BN_CTX_free) {
   EC_GROUP_precompute_mult(&*ec_group, &*bn_ctx);
   EC_GROUP_get_order(&*ec_group, *order, &*bn_ctx);
@@ -228,7 +226,7 @@ BigInt Group::randBigInt() {
 Point Group::operator*(const BigInt& m) const {
   Point res(*this);
   int ret = EC_POINT_mul(&*ec_group, res.point, *m, NULL, NULL, &*bn_ctx);
-  if(ret == 0) {
+  if (ret == 0) {
     error("ECC GEN MUL");
   }
   return res;
